@@ -20,6 +20,7 @@ DeepSeek Flow 是 [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Har
 | 跑分、Bench 一堆用不上的 | 只做三件事：**编辑流程 · 同步文档 · AI 校验/优化** |
 | 画布库越用越重 | **自研原生 SVG 边层 + HTML 节点层**，不依赖 @xyflow，bundle 约 120 KB |
 | 颜色写死，和你的界面打架 | 全部 Harness 主题 token——**明暗主题自动跟随 WebUI** |
+| 界面语言固定 | **界面语言跟随 WebUI 语言自动切换**（中文/English） |
 
 **内置 AI 助手**（手动触发、一次性 Agent）：逻辑校验 + 单文档/整流程优化，全部**接受/拒绝制**——你不点接受，一个字都不会落盘。任务跑在**独立会话**里：切走、切会话都不中断，回来结果还在。模型与思考强度可以在界面上选。
 

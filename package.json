@@ -1,6 +1,6 @@
 {
   "name": "deepseek-flow",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "DeepSeekFlow — per-session visual workflow plugin for DeepSeek Harness: canvas ↔ WORKFLOW.md/STEP.md two-way sync, AI review/optimize, theme-following UI.",
   "type": "module",
   "main": "lib/index.js",
@@ -31,6 +31,7 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-slots"
       ],

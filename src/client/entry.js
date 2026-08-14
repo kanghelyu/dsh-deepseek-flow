@@ -4,10 +4,21 @@
 
 import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback } from "react";
 
-const inject = ["slots", "connection"];
+const inject = ["slots", "connection", "locale"];
 const CLIENT_REV = "__DEEPSEEK_FLOW_CLIENT_REV__";
 
 // ============ 语言 ============
+function localeLanguage(localeService) {
+  try {
+    const snapshot = localeService?.getLocale?.();
+    const active = String(snapshot?.active ?? "");
+    if (active) return active.toLowerCase().startsWith("zh") ? "zh" : "en";
+  } catch {
+    // fall through
+  }
+  return browserLanguage();
+}
+
 function browserLanguage() {
   try {
     return String(navigator.language ?? "en").toLowerCase().startsWith("zh") ? "zh" : "en";
@@ -2298,7 +2309,14 @@ function Studio({ connection, sessionId, language }) {
 }
 
 // ============ 视图 ============
-function DeepSeekFlowView({ connection, sessionId, language }) {
+function DeepSeekFlowView({ connection, sessionId, language: initialLanguage, locale }) {
+  const [language, setLanguage] = useState(initialLanguage);
+  useEffect(() => {
+    if (!locale || typeof locale.subscribe !== "function") return undefined;
+    const update = () => setLanguage(localeLanguage(locale));
+    update();
+    return locale.subscribe(update);
+  }, [locale]);
   const t = useMemo(() => text(language), [language]);
   const rootRef = React.useRef(null);
   useLayoutEffect(() => {
@@ -2338,7 +2356,7 @@ function DeepSeekFlowView({ connection, sessionId, language }) {
 
 // ============ 插件入口 ============
 function apply(ctx) {
-  const language = browserLanguage();
+  const language = localeLanguage(ctx.locale);
   ctx.effect(() => {
     const tag = document.createElement("style");
     tag.dataset.plugin = "deepseek-flow";
@@ -2352,11 +2370,12 @@ function apply(ctx) {
     name: "conversation.view",
     id: "deepseek-flow",
     order: 20,
-    label: () => text(language).view,
+    label: () => text(localeLanguage(ctx.locale)).view,
     inject: (sessionId) => ({
       connection: ctx.connection,
       sessionId: String(sessionId),
-      language
+      language: localeLanguage(ctx.locale),
+      locale: ctx.locale
     })
   }, DeepSeekFlowView));
 }

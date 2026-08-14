@@ -20,6 +20,7 @@ DeepSeek Flow is a visual-workflow plugin for [DeepSeek Harness](https://github.
 | Benchmarks and bloat you never touch | Only three jobs: **edit flows · sync docs · AI review/optimize** |
 | Heavy third-party canvas libraries | **Hand-rolled SVG edge layer + HTML node layer** — no @xyflow, ~120 KB bundle |
 | Hard-coded colors that clash with your UI | Harness theme tokens — **follows your WebUI light/dark theme automatically** |
+| Chinese-only or English-only UI | **UI language follows your WebUI locale automatically** (中文/English) |
 
 **Built-in AI assistant** (manual, one-shot): logic validation and single-doc / whole-flow optimization with explicit **accept/reject** — nothing is written until you accept. Jobs run in an **isolated session**, so switching views or sessions never interrupts them, and results are waiting when you come back. Model and reasoning effort are selectable in the UI.
 

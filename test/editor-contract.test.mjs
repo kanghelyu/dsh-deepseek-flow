@@ -155,10 +155,11 @@ test("Error and Warn counters are real toggle filters", () => {
 test("client manifest mirrors services and slot packages actually consumed", () => {
   assert.deepEqual(manifest.dsh.client.inject, [
     "@deepseek-ai/dsh-client-connection",
+    "@deepseek-ai/dsh-client-locale",
     "@deepseek-ai/dsh-client-ui-conversation",
     "@deepseek-ai/dsh-client-ui-slots"
   ]);
-  assert.deepEqual(JSON.parse(client.match(/const inject = (\[[^;]+\])/)[1]), ["slots", "connection"]);
+  assert.deepEqual(JSON.parse(client.match(/const inject = (\[[^;]+\])/)[1]), ["slots", "connection", "locale"]);
   assert.match(client, /ctx\.slots\.inject\("conversation\.view"/);
   assert.ok(manifest.files.includes("lib"));
   assert.ok(manifest.files.includes("src"));
