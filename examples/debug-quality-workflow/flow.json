@@ -1,0 +1,32 @@
+{
+  "id": "debug-quality-workflow",
+  "version": 1,
+  "name": "试运行、截图调试与质量检查工作流",
+  "description": "实现后实际启动，在关键状态截图调试，再执行功能、构建、回归和界面质检。",
+  "workflowDoc": "WORKFLOW.md",
+  "docs": {
+    "input": "01-input/STEP.md",
+    "plan": "02-plan/STEP.md",
+    "build": "03-build/STEP.md",
+    "debug": "04-debug/STEP.md",
+    "quality": "05-quality/STEP.md",
+    "output": "06-output/STEP.md"
+  },
+  "nodes": [
+    { "id": "input", "kind": "input", "position": { "x": 40, "y": 180 }, "data": { "label": "输入" } },
+    { "id": "plan", "kind": "agent", "position": { "x": 290, "y": 180 }, "data": { "label": "规划与拆解", "prompt": "{{input}}" } },
+    { "id": "build", "kind": "agent", "position": { "x": 540, "y": 180 }, "data": { "label": "实现与产出", "prompt": "{{input}}" } },
+    { "id": "debug", "kind": "agent", "position": { "x": 790, "y": 180 }, "data": { "label": "试运行与截图调试", "prompt": "{{input}}" } },
+    { "id": "quality", "kind": "agent", "position": { "x": 1040, "y": 180 }, "data": { "label": "质量检查", "prompt": "{{input}}" } },
+    { "id": "output", "kind": "output", "position": { "x": 1290, "y": 180 }, "data": { "label": "输出" } }
+  ],
+  "edges": [
+    { "id": "e-input-plan", "source": "input", "target": "plan" },
+    { "id": "e-plan-build", "source": "plan", "target": "build" },
+    { "id": "e-build-debug", "source": "build", "target": "debug" },
+    { "id": "e-debug-quality", "source": "debug", "target": "quality" },
+    { "id": "e-quality-output", "source": "quality", "target": "output" }
+  ],
+  "inputs": ["input"],
+  "outputs": ["output"]
+}

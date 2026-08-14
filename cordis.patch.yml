@@ -1,0 +1,6 @@
+# DeepSeekFlow 插件行：每 session 独立工作流，存储于 ~/.dsh/deepseek-flow/
+- insert:
+    - id: deepseek-flow
+      name: deepseek-flow
+      config:
+        dataDir: !!js dshHomePath('deepseek-flow')
