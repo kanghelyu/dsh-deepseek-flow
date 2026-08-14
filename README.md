@@ -45,25 +45,25 @@
 
 ---
 
-## 部署（两分钟）
+## 部署（一条命令）
 
 ```bash
-# 1. 安装（纯 git 源，构建产物已入库）
 dsh plugin --profile web add "github:kanghelyu/dsh-deepseek-flow#main"
+# 然后重启 dsh web 即可（bundle 插件重启生效）
+```
 
-# 2. 注册到 bundle 层：编辑 ~/.dsh/profiles/web/package.json，
-#    在 dsh.profile.bundles 数组里加 "deepseek-flow"
+**真的就是一条命令**：纯 git 源安装、构建产物已入库、依赖全部来自 registry、bundle 层（cordis.patch）随安装自动挂载——已在全新 profile 实测验证（安装 19 秒、Host/Typert 加载通过、组合树自动注册，无需改任何配置）。
 
-# 3. 依赖自愈（@deepseek-ai/* 私有包链接到全局安装）
-cd ~/.dsh/profiles/web/node_modules/deepseek-flow && bash scripts/ensure-deps.sh
+安装后验证：
 
-# 4. 重启并检查
-# 重启 dsh web 后：dsh web --dump-config | grep deepseek-flow
+```bash
+dsh web --dump-config | grep deepseek-flow   # 组合树应包含 deepseek-flow 行
 ```
 
 本地开发用 `dsh plugin --profile web add link:/path/to/deepseek-flow`。
 
-> 卸载：`dsh plugin --profile web remove deepseek-flow`，并手动删除 cordis.patch.yml 里的 insert 行。
+> 卸载：`dsh plugin --profile web remove deepseek-flow`。若你的环境曾手工修改过 patch 层（如早期版本的手动 insert 行），删除对应行即可。
+> 依赖兜底：如果极老环境（自带残缺 node_modules）出现 `@deepseek-ai/*` 解析失败，运行仓库内 `bash scripts/ensure-deps.sh` 即可自愈。
 
 ### 使用速览
 
@@ -161,25 +161,25 @@ The UI is currently optimized for **Web UI**. The Host logic is UI-agnostic, so 
 
 ---
 
-## Deploy (two minutes)
+## Deploy (one command)
 
 ```bash
-# 1. Install (pure git source; build artifacts are committed)
 dsh plugin --profile web add "github:kanghelyu/dsh-deepseek-flow#main"
+# then restart dsh web (bundle plugins activate on restart)
+```
 
-# 2. Register the bundle: edit ~/.dsh/profiles/web/package.json,
-#    add "deepseek-flow" to dsh.profile.bundles
+**Really just one command**: pure git source, build artifacts committed, dependencies all from the registry, and the bundle layer (cordis.patch) mounts automatically with the install — verified on a fresh profile (19s install, Host/Typert load OK, composition tree auto-registered, zero manual config).
 
-# 3. Dependency self-heal (links private @deepseek-ai/* to the global install)
-cd ~/.dsh/profiles/web/node_modules/deepseek-flow && bash scripts/ensure-deps.sh
+Verify after install:
 
-# 4. Restart and verify
-# After restarting dsh web: dsh web --dump-config | grep deepseek-flow
+```bash
+dsh web --dump-config | grep deepseek-flow   # the tree should contain the deepseek-flow row
 ```
 
 Local development: `dsh plugin --profile web add link:/path/to/deepseek-flow`.
 
-> Uninstall: `dsh plugin --profile web remove deepseek-flow`, then remove the insert row in cordis.patch.yml manually.
+> Uninstall: `dsh plugin --profile web remove deepseek-flow`. If your environment was ever hand-patched (e.g. manual insert rows from early versions), remove that row as well.
+> Dependency fallback: if a very old environment (with a broken node_modules) fails to resolve `@deepseek-ai/*`, run `bash scripts/ensure-deps.sh` from the repo.
 
 ### Quick usage
 
