@@ -6,7 +6,10 @@
 
 [![GitHub release](https://img.shields.io/github/v/release/kanghelyu/dsh-deepseek-flow?label=release)](https://github.com/kanghelyu/dsh-deepseek-flow/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-31%2F31-brightgreen.svg)](test/)
+
+**Say *"build a workflow"* — and the workflow appears as an editable diagram.**
+
+Install this plugin and your Agent learns a built-in skill for it: whenever you say things like *"构建工作流"* / *"build a workflow"* / *"import a workflow"*, the workflow is scaffolded through this plugin — a `WORKFLOW.md` master doc, one `STEP.md` workspace per step, and a canvas with every node wired up — ready to view and edit in the **DeepSeek Flow** tab.
 
 DeepSeek Flow is a visual-workflow plugin for [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness). It turns the `WORKFLOW.md` + per-step `STEP.md` pattern you already use with Codex/Claude into a diagram you can edit: document rail on the left, canvas in the middle, Markdown editor on the right, AI assistant at the bottom.
 
@@ -21,6 +24,7 @@ DeepSeek Flow is a visual-workflow plugin for [DeepSeek Harness](https://github.
 | Heavy third-party canvas libraries | **Hand-rolled SVG edge layer + HTML node layer** — no @xyflow, ~120 KB bundle |
 | Hard-coded colors that clash with your UI | Harness theme tokens — **follows your WebUI light/dark theme automatically** |
 | Chinese-only or English-only UI | **UI language follows your WebUI locale automatically** (中文/English) |
+| Saying "make me a workflow" does nothing | **One-sentence workflow building** — a built-in skill turns that phrase into a diagram + docs |
 
 **Built-in AI assistant** (manual, one-shot): logic validation and single-doc / whole-flow optimization with explicit **accept/reject** — nothing is written until you accept. Jobs run in an **isolated session**, so switching views or sessions never interrupts them, and results are waiting when you come back. Model and reasoning effort are selectable in the UI.
 

@@ -6,7 +6,10 @@
 
 [![GitHub release](https://img.shields.io/github/v/release/kanghelyu/dsh-deepseek-flow?label=release)](https://github.com/kanghelyu/dsh-deepseek-flow/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-31%2F31-brightgreen.svg)](test/)
+
+**说一句「构建工作流」——工作流就变成一张可编辑的图。**
+
+装上这个插件，你的 Agent 就学会了一个内置技能：只要你提到「构建工作流」「导入工作流」「把流程做成图」这类话术，工作流就会通过本插件自动落地——一份 `WORKFLOW.md` 总纲、每一步一个 `STEP.md` 独立工作区，外加一张节点全部连好的画布——在 **DeepSeek Flow** 标签里即可查看和编辑。
 
 DeepSeek Flow 是 [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) 的可视化工作流插件。你在 Codex / Claude 里用的「`WORKFLOW.md` + 每步一个 `STEP.md`」模式，它会变成一张可以编辑的流程图：左边文档目录，中间画布，右边 Markdown 编辑器，底部 AI 助手。
 
@@ -21,6 +24,7 @@ DeepSeek Flow 是 [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Har
 | 画布库越用越重 | **自研原生 SVG 边层 + HTML 节点层**，不依赖 @xyflow，bundle 约 120 KB |
 | 颜色写死，和你的界面打架 | 全部 Harness 主题 token——**明暗主题自动跟随 WebUI** |
 | 界面语言固定 | **界面语言跟随 WebUI 语言自动切换**（中文/English） |
+| 说「做个工作流」没反应 | **一句话构建工作流**——内置技能把这个话术变成图 + 文档 |
 
 **内置 AI 助手**（手动触发、一次性 Agent）：逻辑校验 + 单文档/整流程优化，全部**接受/拒绝制**——你不点接受，一个字都不会落盘。任务跑在**独立会话**里：切走、切会话都不中断，回来结果还在。模型与思考强度可以在界面上选。
 
