@@ -351,7 +351,10 @@ const styles = String.raw`
 .df-docitem__icon{width:24px;height:28px;border:1px solid currentColor;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;opacity:.76}
 .df-docitem__label{display:block;font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .df-docitem__path{display:block;font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--df-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.df-inspector{min-width:0;width:auto;height:100%;max-height:100%;display:flex;flex-direction:column;gap:11px;padding:15px;background:var(--df-layer);overflow-y:auto;min-height:0;overscroll-behavior:contain;scrollbar-width:thin}
+.df-inspector{min-width:0;width:auto;height:100%;max-height:100%;display:flex;flex-direction:column;background:var(--df-layer);overflow:hidden;min-height:0}
+ .df-inspector__scroll{flex:1 1 0;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:15px;display:flex;flex-direction:column;gap:11px;scrollbar-width:none}
+ .df-inspector__scroll::-webkit-scrollbar{display:none}
+ .df-inspector__scroll>*{flex-shrink:0}
  .df-inspector>*{flex-shrink:0}
 .df-inspector.is-collapsed{visibility:hidden;pointer-events:none;padding:0}
 .df-inspector h3{margin:0;font-size:14px;color:var(--df-ink)}
@@ -1961,6 +1964,7 @@ function Studio({ connection, sessionId, language }) {
   );
 
   const inspector = React.createElement("aside", { className: `df-inspector${inspectorOpen ? "" : " is-collapsed"}` },
+    React.createElement("div", { className: "df-inspector__scroll" },
     activeDoc === "workflow" && currentFlow
       ? [
           React.createElement("h3", { key: "title" }, currentFlow.workflowDoc ?? "WORKFLOW.md"),
@@ -2042,6 +2046,7 @@ function Studio({ connection, sessionId, language }) {
           React.createElement("h3", { key: "title" }, t.properties),
           React.createElement("div", { key: "empty", className: "df-empty" }, t.openDocument)
         ]
+    )
   );
 
   const findings = validationResult?.findings ?? [];
