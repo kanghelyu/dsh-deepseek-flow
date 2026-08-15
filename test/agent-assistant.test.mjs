@@ -115,7 +115,8 @@ test("manual assist starts a one-shot child Agent, returns its structured result
     },
     assistantProvider: undefined,
     assistantTimeoutMs: 5_000,
-    assistControllers: new Map()
+    assistControllers: new Map(),
+    assistRuns: new Map()
   };
   const result = await runAgentAssist(host, {
     sessionId: "session-a",
@@ -123,13 +124,14 @@ test("manual assist starts a one-shot child Agent, returns its structured result
     flow: flowFixture(),
     mode: "logic"
   });
-  assert.match(startRequest.parent.id, /^isolated-dflow-assist-/);
+  assert.equal(startRequest.parent.id, "session-a");
   assert.ok(startRequest.outputSchema);
   assert.match(startRequest.prompt[0].text, /MASTER_ONLY/);
   assert.equal(result.findings[0].documentId, "output");
   assert.equal(result.agent.runId, "child-agent");
-  assert.equal(disposed, 2);
+  assert.equal(disposed, 1);
   assert.equal(host.assistControllers.size, 0);
+  assert.equal(host.assistRuns.size, 0);
 });
 
 test("whole-workflow assist uses the dedicated schema and disposes after a complete result", async () => {
@@ -169,7 +171,8 @@ test("whole-workflow assist uses the dedicated schema and disposes after a compl
     },
     assistantProvider: undefined,
     assistantTimeoutMs: 5_000,
-    assistControllers: new Map()
+    assistControllers: new Map(),
+    assistRuns: new Map()
   };
   const result = await runAgentAssist(host, {
     sessionId: "session-a",
@@ -180,11 +183,12 @@ test("whole-workflow assist uses the dedicated schema and disposes after a compl
   assert.match(startRequest.label, /整体优化/);
   assert.equal(startRequest.outputSchema.required[1], "documents");
   assert.equal(result.documents.length, 3);
-  assert.equal(disposed, 2);
+  assert.equal(disposed, 1);
 });
 
 test("cancel aborts the active child Agent and still disposes its run", async () => {
   let disposed = 0;
+  let cancelledTurns = 0;
   const host = {
     agentCtx: {
       agents: {
@@ -199,6 +203,9 @@ test("cancel aborts the active child Agent and still disposes its run", async ()
         async start(_provider, request) {
           return {
             id: "child-agent",
+            localAgent: {
+              cancel() { cancelledTurns += 1; }
+            },
             result: new Promise((resolve) => request.signal.addEventListener("abort", () => resolve({ stopReason: "aborted", output: [] }), { once: true })),
             async dispose() { disposed += 1; }
           };
@@ -207,7 +214,8 @@ test("cancel aborts the active child Agent and still disposes its run", async ()
     },
     assistantProvider: undefined,
     assistantTimeoutMs: 5_000,
-    assistControllers: new Map()
+    assistControllers: new Map(),
+    assistRuns: new Map()
   };
   const pending = runAgentAssist(host, {
     sessionId: "session-a",
@@ -217,7 +225,9 @@ test("cancel aborts the active child Agent and still disposes its run", async ()
   });
   await Promise.resolve();
   assert.equal(cancelAgentAssist(host, "session-a", "request-a"), true);
+  assert.equal(cancelledTurns, 1);
   await assert.rejects(pending, /aborted/);
-  assert.equal(disposed, 2);
+  assert.equal(disposed, 1);
   assert.equal(host.assistControllers.size, 0);
+  assert.equal(host.assistRuns.size, 0);
 });
