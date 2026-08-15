@@ -1,6 +1,6 @@
 {
   "name": "deepseek-flow",
-  "version": "0.3.16",
+  "version": "0.3.17",
   "description": "DeepSeek Flow — Markdown-first visual workflow plugin for DeepSeek Harness with executable Boolean gate semantics, two-way canvas sync, and AI review/optimization.",
   "license": "MIT",
   "repository": {

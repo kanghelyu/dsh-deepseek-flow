@@ -280,6 +280,22 @@ test("topology edits require an explicit bottom-right main-Session review before
   assert.match(descriptors, /"topologyApply"/);
 });
 
+test("external file topology uses an invisible direct-finalize path while canvas edits keep review", () => {
+  assert.match(host, /name:\s*"flow_finalize_canvas"/);
+  assert.match(host, /agentFinalizeRequests/);
+  assert.match(host, /skippedMainSession:\s*true/);
+  assert.match(host, /documentPolicy:\s*"prefer-disk"/);
+  assert.match(client, /canvasTopologyEditedRef/);
+  assert.match(client, /markCanvasTopologyEdit/);
+  assert.match(client, /dflow\/finalizePending/);
+  assert.match(client, /dflow\/topologyFinalize/);
+  assert.match(client, /data-df-action": "agent-finalize-topology"/);
+  assert.match(client, /hidden:\s*true/);
+  assert.match(client, /source:\s*"external-files"/);
+  assert.match(descriptors, /"finalizePending"/);
+  assert.match(descriptors, /"topologyFinalize"/);
+});
+
 test("bundled skill always has a real body and teaches executable gate JSON", () => {
   const body = bundledSkill.replace(/^---\n[\s\S]*?\n---\n/, "").trim();
   assert.ok(body.length > 500);
@@ -287,6 +303,7 @@ test("bundled skill always has a real body and teaches executable gate JSON", ()
   assert.match(body, /"branch": "true"/);
   assert.match(body, /"branch": "false"/);
   assert.match(body, /不要再要求用户去画布点“应用修改”/);
+  assert.match(body, /flow_finalize_canvas/);
   assert.ok(manifest.files.includes("skills"));
   assert.match(host, /ctx\.inject\(\["skills"\]/);
   assert.match(host, /bundledSkillContent/);

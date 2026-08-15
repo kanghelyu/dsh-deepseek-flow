@@ -156,6 +156,10 @@ function Studio({ connection, sessionId, language }) {
   const documentRevisionRef = React.useRef(0);
   const persistedRevisionRef = React.useRef(new Map());
   const persistedFlowRef = React.useRef(null);
+  const canvasTopologyEditedRef = React.useRef(false);
+  const agentFinalizeButtonRef = React.useRef(null);
+  const pendingAgentFinalizeRef = React.useRef(null);
+  const agentFinalizeBusyRef = React.useRef(false);
   const optimizationRequestRef = React.useRef(0);
   const activeAssistRef = React.useRef(null);
   const currentIdRef = React.useRef(null);
@@ -166,6 +170,10 @@ function Studio({ connection, sessionId, language }) {
   const canvasShellRef = React.useRef(null);
   const panelDragRef = React.useRef(null);
   const assistantDragRef = React.useRef(null);
+
+  const markCanvasTopologyEdit = useCallback(() => {
+    canvasTopologyEditedRef.current = true;
+  }, []);
 
   const fitWholeFlow = useCallback((duration = 260) => {
     flowInstance?.fitView?.({ padding: 0.18, minZoom: GRAPH_MIN_ZOOM, maxZoom: 1.15, duration });
@@ -297,6 +305,7 @@ function Studio({ connection, sessionId, language }) {
 
   const showFlow = useCallback((flow, options = {}) => {
     if (!flow) return;
+    canvasTopologyEditedRef.current = false;
     persistedRevisionRef.current.set(flow.id, Number(flow.revision) || 0);
     persistedFlowRef.current = flow;
     setPersistedTopologySignature(topologySignature(flow));
@@ -561,6 +570,91 @@ function Studio({ connection, sessionId, language }) {
     : null;
   const selectedNode = nodes.find((n) => n.id === selected) ?? null;
 
+  const finalizeTopologyDirectly = useCallback(async () => {
+    if (agentFinalizeBusyRef.current || canvasTopologyEditedRef.current) return;
+    const baseFlow = persistedFlowRef.current;
+    const flowId = currentIdRef.current;
+    if (!baseFlow || !flowId) return;
+    agentFinalizeBusyRef.current = true;
+    setTopologyApplyConfirm(false);
+    setTopologyApplyBusy(true);
+    setMessage(t.hiddenFinalizeApplying);
+    const pending = pendingAgentFinalizeRef.current;
+    try {
+      if (documentTimerRef.current) clearTimeout(documentTimerRef.current);
+      documentTimerRef.current = null;
+      await documentWriteChainRef.current.catch(() => {});
+      const draftFlow = serializeFlow(baseFlow, nodesRef.current, edgesRef.current);
+      const finalized = await remoteCall(connection, "dflow/topologyFinalize", {
+        request: {
+          sessionId,
+          draftFlow,
+          ...(pending?.requestId
+            ? { requestId: pending.requestId }
+            : {
+                source: "external-files",
+                expectedRevision: persistedRevisionRef.current.get(flowId)
+              })
+        }
+      });
+      if (!finalized?.finalized || !finalized.flow) throw new Error("Hidden finalize did not return a saved flow");
+      const saved = finalized.flow;
+      setFlows((items) => items.some((item) => item.id === saved.id)
+        ? items.map((item) => item.id === saved.id ? { ...item, ...saved } : item)
+        : [saved, ...items]);
+      showFlow(saved, { resetDocument: false });
+      setDirty(false);
+      setMessage(t.hiddenFinalizeApplied);
+    } catch (error) {
+      // Stop automatic retries. The visible Apply action remains available and
+      // follows the normal main-Session review path.
+      canvasTopologyEditedRef.current = true;
+      setMessage(t.hiddenFinalizeFailed + String(error));
+    } finally {
+      pendingAgentFinalizeRef.current = null;
+      agentFinalizeBusyRef.current = false;
+      setTopologyApplyBusy(false);
+    }
+  }, [connection, sessionId, showFlow, t.hiddenFinalizeApplied, t.hiddenFinalizeApplying, t.hiddenFinalizeFailed]);
+
+  // Primary path: topology that appeared without any canvas edit event came
+  // from an external file/session refresh, so the invisible direct-finalize
+  // action is safe to press automatically. User canvas edits set the ref first
+  // and continue through the visible review button.
+  useEffect(() => {
+    if (!topologyDirty || topologyApplyBusy || canvasTopologyEditedRef.current) return undefined;
+    const timer = window.setTimeout(() => agentFinalizeButtonRef.current?.click(), 120);
+    return () => window.clearTimeout(timer);
+  }, [currentTopologySignature, topologyApplyBusy, topologyDirty]);
+
+  // Secondary path: an Agent that directly edited workflow files can enqueue
+  // the same invisible action. Requests survive until Studio is opened.
+  useEffect(() => {
+    let cancelled = false;
+    let polling = false;
+    const poll = async () => {
+      const flowId = currentIdRef.current;
+      if (cancelled || polling || !flowId || !topologyDirty || topologyApplyBusy || canvasTopologyEditedRef.current) return;
+      polling = true;
+      try {
+        const pending = await remoteCall(connection, "dflow/finalizePending", { sessionId, id: flowId });
+        if (cancelled || !pending?.requestId) return;
+        pendingAgentFinalizeRef.current = pending;
+        agentFinalizeButtonRef.current?.click();
+      } catch {
+        // A missed poll is harmless; the one-time request remains queued.
+      } finally {
+        polling = false;
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [connection, sessionId, topologyApplyBusy, topologyDirty]);
+
   useEffect(() => {
     let cancelled = false;
     let refreshing = false;
@@ -685,6 +779,7 @@ function Studio({ connection, sessionId, language }) {
   }, []);
 
   const restoreGraph = useCallback((snapshot) => {
+    markCanvasTopologyEdit();
     setNodes(snapshot.nodes);
     setEdges(snapshot.edges);
     nodesRef.current = snapshot.nodes;
@@ -696,7 +791,7 @@ function Studio({ connection, sessionId, language }) {
     if (selectedEdge && !snapshot.edges.some((edge) => edge.id === selectedEdge)) setSelectedEdge(null);
     ++documentRevisionRef.current;
     setDirty(true);
-  }, [selected, selectedEdge, setEdges, setNodes]);
+  }, [markCanvasTopologyEdit, selected, selectedEdge, setEdges, setNodes]);
 
   const undoGraph = useCallback(() => {
     const history = historyRef.current;
@@ -740,13 +835,14 @@ function Studio({ connection, sessionId, language }) {
       } : {})
     };
     rememberGraph();
+    markCanvasTopologyEdit();
     const nextEdges = [...edgesRef.current, edge];
     edgesRef.current = nextEdges;
     setEdges(nextEdges);
     ++documentRevisionRef.current;
     setDirty(true);
     return true;
-  }, [rememberGraph, setEdges, showConnectionWarning, t]);
+  }, [markCanvasTopologyEdit, rememberGraph, setEdges, showConnectionWarning, t]);
 
   const onConnect = useCallback((conn) => {
     const problem = connectionProblem(nodesRef.current, edgesRef.current, conn);
@@ -773,6 +869,7 @@ function Studio({ connection, sessionId, language }) {
 
   const onReconnect = useCallback((oldEdge, connectionParams) => {
     rememberGraph();
+    markCanvasTopologyEdit();
     setEdges((items) => reconnectFlowEdge(oldEdge, connectionParams, items).map((edge) => edge.id === oldEdge.id
       ? {
           ...edge,
@@ -782,7 +879,7 @@ function Studio({ connection, sessionId, language }) {
       : edge));
     ++documentRevisionRef.current;
     setDirty(true);
-  }, [rememberGraph, setEdges, t]);
+  }, [markCanvasTopologyEdit, rememberGraph, setEdges, t]);
 
   const isValidConnection = useCallback((connectionParams) => {
     return connectionProblem(nodesRef.current, edgesRef.current, connectionParams).valid;
@@ -805,6 +902,7 @@ function Studio({ connection, sessionId, language }) {
 
   const createNode = (kind, gateType = null) => {
     rememberGraph();
+    markCanvasTopologyEdit();
     const id = `${kind}-${Math.random().toString(36).slice(2, 7)}`;
     const node = {
       id,
@@ -836,12 +934,14 @@ function Studio({ connection, sessionId, language }) {
   };
 
   const patchSelected = (patch) => {
+    const topologyKeys = ["label", "gateType", "predicate", "inputPredicates", "order"];
+    const changesTopology = Object.keys(patch).some((key) => topologyKeys.includes(key));
+    if (changesTopology) markCanvasTopologyEdit();
     const nextNodes = nodes.map((node) => node.id === selected ? { ...node, data: { ...node.data, ...patch } } : node);
     setNodes(nextNodes);
     nodesRef.current = nextNodes;
     setDirty(true);
-    const topologyKeys = ["label", "gateType", "predicate", "inputPredicates", "order"];
-    if (Object.keys(patch).some((key) => topologyKeys.includes(key))) {
+    if (changesTopology) {
       ++documentRevisionRef.current;
     } else {
       scheduleDocumentSave(currentFlow, nextNodes, edges);
@@ -881,6 +981,7 @@ function Studio({ connection, sessionId, language }) {
   const removeSelected = () => {
     if (selected === null) return;
     rememberGraph();
+    markCanvasTopologyEdit();
     setNodes((nds) => nds.filter((n) => n.id !== selected));
     setEdges((eds) => eds.filter((e) => e.source !== selected && e.target !== selected));
     setFlows((items) => items.map((flow) => {
@@ -898,11 +999,12 @@ function Studio({ connection, sessionId, language }) {
   const removeSelectedEdge = useCallback(() => {
     if (!selectedEdge) return;
     rememberGraph();
+    markCanvasTopologyEdit();
     setEdges((items) => items.filter((edge) => edge.id !== selectedEdge));
     setSelectedEdge(null);
     ++documentRevisionRef.current;
     setDirty(true);
-  }, [rememberGraph, selectedEdge, setEdges]);
+  }, [markCanvasTopologyEdit, rememberGraph, selectedEdge, setEdges]);
 
   const tidyGraph = useCallback(() => {
     if (nodesRef.current.length === 0) return;
@@ -943,6 +1045,7 @@ function Studio({ connection, sessionId, language }) {
     try {
       const flow = JSON.parse(await file.text());
       if (!flow.id || !Array.isArray(flow.nodes)) throw new Error("missing id/nodes");
+      markCanvasTopologyEdit();
       const existing = flows.find((candidate) => candidate.id === flow.id) ?? null;
       currentIdRef.current = flow.id;
       setCurrentId(flow.id);
@@ -1282,6 +1385,7 @@ function Studio({ connection, sessionId, language }) {
       showFlow(saved, { resetDocument: false });
       setDirty(false);
     } else {
+      markCanvasTopologyEdit();
       const draftNodes = flowToCanvasNodes({ ...optimizedFlow, docs: saved.docs });
       setNodes(draftNodes);
       nodesRef.current = draftNodes;
@@ -1964,6 +2068,16 @@ function Studio({ connection, sessionId, language }) {
     )
   );
 
+  const hiddenAgentFinalizeButton = React.createElement("button", {
+    ref: agentFinalizeButtonRef,
+    type: "button",
+    hidden: true,
+    tabIndex: -1,
+    "aria-hidden": "true",
+    "data-df-action": "agent-finalize-topology",
+    onClick: finalizeTopologyDirectly
+  });
+
   const panelBudget = Math.max(0, studioWidth - 340 - 18);
   let effectiveDocumentWidth = documentsOpen ? Math.min(documentWidth, studioWidth * 0.42) : 0;
   let effectiveInspectorWidth = inspectorOpen ? Math.min(inspectorWidth, studioWidth * 0.46) : 0;
@@ -2029,6 +2143,7 @@ function Studio({ connection, sessionId, language }) {
     documentRail,
     leftSplitter,
     React.createElement("div", { className: "df-canvas-shell", ref: canvasShellRef },
+      hiddenAgentFinalizeButton,
       workflowConfirmDialog,
       cancelConfirmDialog,
       topologyConfirmDialog,
