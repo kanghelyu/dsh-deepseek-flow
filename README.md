@@ -20,8 +20,8 @@ DeepSeek Flow turns a `WORKFLOW.md` and its step-level `STEP.md` files into an e
 It is intentionally an editor—not a workflow runtime. DeepSeek Flow helps you design, inspect, and improve a workflow; execution remains in the current Session.
 
 <p align="center">
-  <img src="docs/images/dark.png" width="49%" alt="DeepSeek Flow in dark mode">
-  <img src="docs/images/light.png" width="49%" alt="DeepSeek Flow in light mode">
+  <img src="docs/images/engdark.png" width="49%" alt="DeepSeek Flow in dark mode">
+  <img src="docs/images/englight.png" width="49%" alt="DeepSeek Flow in light mode">
 </p>
 
 ## What it gives you

@@ -18,8 +18,8 @@ DeepSeek Flow 把一份 `WORKFLOW.md` 和各步骤的 `STEP.md` 变成 DeepSeek 
 它刻意只做编辑器，不做工作流运行器。你可以在 DeepSeek Flow 里设计、检查和优化工作流；真正执行仍然发生在当前 Session。
 
 <p align="center">
-  <img src="docs/images/dark.png" width="49%" alt="DeepSeek Flow 深色模式">
-  <img src="docs/images/light.png" width="49%" alt="DeepSeek Flow 浅色模式">
+  <img src="docs/images/cndarkui.png" width="49%" alt="DeepSeek Flow 深色模式">
+  <img src="docs/images/cnlightui.png" width="49%" alt="DeepSeek Flow 浅色模式">
 </p>
 
 ## 你会得到什么
