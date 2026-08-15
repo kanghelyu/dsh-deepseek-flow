@@ -136,7 +136,6 @@ test("bottom assistant manually delegates validation and optimization to a one-s
   assert.match(client, /"data-df-action": "confirm-optimize-workflow"/);
   assert.match(client, /acceptOptimization/);
   assert.match(client, /discardOptimization/);
-  assert.match(client, /logicSnapshot/);
   assert.match(client, /staleSuggestion/);
   assert.match(client, /sessionId, requestId, flow, mode: "logic"/);
   assert.match(client, /sessionId, requestId: agentRequestId, flow, mode: "optimize"/);

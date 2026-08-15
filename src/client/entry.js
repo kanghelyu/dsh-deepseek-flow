@@ -26,7 +26,6 @@ import {
   flowToCanvasNodes,
   graphSnapshot,
   layoutNodes,
-  logicSnapshot,
   reconnectFlowEdge,
   serializeFlow
 } from "./graph-model.js";
@@ -406,11 +405,7 @@ function Studio({ connection, sessionId, language }) {
               if (finalEntry.status === "cancelled") {
                 setMessage(t.assistantCancelled);
               } else if (finalEntry.status === "done" && finalEntry.result) {
-                setValidationResult({
-                  ...finalEntry.result,
-                  snapshot: nodesRef.current ? { nodeIds: nodesRef.current.map((node) => node.id) } : [],
-                  checkedAt: new Date().toISOString()
-                });
+                setValidationResult(finalEntry.result);
                 setFindingFilter(null);
                 setMessage(t.validationComplete);
               } else {
@@ -1062,7 +1057,7 @@ function Studio({ connection, sessionId, language }) {
         if (entry.status === "cancelled") {
           setMessage(t.assistantCancelled);
         } else if (entry.status === "done" && entry.result) {
-          setValidationResult({ ...entry.result, snapshot: logicSnapshot(flow), checkedAt: new Date().toISOString() });
+          setValidationResult(entry.result);
           setFindingFilter(null);
           setMessage(t.validationComplete);
         } else {
@@ -1547,8 +1542,6 @@ function Studio({ connection, sessionId, language }) {
     ? findings.filter((finding) => finding.level === findingFilter)
     : findings;
   const counts = validationResult?.summary?.counts ?? { error: 0, warning: 0 };
-  const currentLogicSnapshot = currentFlow ? logicSnapshot(serializeFlow(currentFlow, nodes, edges)) : "";
-  const validationStale = Boolean(validationResult && validationResult.snapshot !== currentLogicSnapshot);
   const optimizationStale = Boolean(optimizationProposal
     && contentForDocument(optimizationProposal.target) !== String(optimizationProposal.originalContent ?? ""));
   const findingDocumentLabel = (finding) => {
@@ -1685,8 +1678,7 @@ function Studio({ connection, sessionId, language }) {
                   "data-df-filter": "warning",
                   "aria-pressed": findingFilter === "warning",
                   onClick: () => setFindingFilter((value) => value === "warning" ? null : "warning")
-                }, `Warn ${counts.warning ?? 0}`),
-                validationStale && React.createElement("span", { key: "stale", className: "df-count is-warning" }, t.validationStale)
+                }, `Warn ${counts.warning ?? 0}`)
               ]
             : React.createElement("span", null, t.validationIdle)
         ),
