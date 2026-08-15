@@ -33,6 +33,26 @@ test("every flow box owns exactly one left and one right handle and every edge h
   assert.doesNotMatch(client, /React\.createElement\(Handle|Position\.Left|Position\.Right/);
 });
 
+test("condition boxes choose a gate first and enforce labeled outgoing branches", () => {
+  assert.match(client, /gatePickerOpen/);
+  assert.match(client, /pendingConnection/);
+  assert.match(client, /connectionWarning/);
+  assert.match(client, /CONDITION_GATE_TYPES\.map/);
+  for (const gate of ["nand", "nor", "xor", "xnor"]) assert.match(client, new RegExp(`${gate}:`));
+  assert.match(client, /"data-df-gate-type": gateType/);
+  assert.match(client, /"data-df-branch": branch/);
+  assert.match(client, /conditionConnection|connectionProblem/);
+  assert.match(client, /availableGateBranches/);
+  assert.match(client, /validateGateBranch/);
+  assert.match(client, /if \(gateType === "ifElse"\)/);
+  assert.match(client, /commitConnection\(conn, gateType\)/);
+  assert.match(client, /onConnectionRejected/);
+  assert.match(client, /gateChangeBlocked/);
+  assert.match(client, /autoLogicLabel/);
+  assert.match(client, /sourceHandle: branch/);
+  assert.match(client, /t\.gateTypeLabel/);
+});
+
 test("arrows stay prominent across themes, never fill, and long flows can fit", () => {
   assert.match(client, /markerWidth:\s*10/);
   assert.match(client, /markerHeight:\s*10/);

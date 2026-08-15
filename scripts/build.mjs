@@ -22,6 +22,7 @@ async function buildWithEsbuild() {
 
 function transformEntry(source) {
   return source
+    .replace(/^import\s*\{[\s\S]*?\}\s*from "\.\.\/\.\.\/lib\/condition-gates\.js";\s*/m, "")
     .replace(/^import React,\s*\{([^}]+)\}\s*from "react";\s*/m, (_match, names) => {
       return `const import_react3 = require("react");\nconst React = import_react3.default ?? import_react3;\nconst {${names}} = import_react3;\n`;
     })
@@ -29,9 +30,18 @@ function transformEntry(source) {
     .replace(/\bReact\./g, "React.");
 }
 
+function transformGateLogic(source) {
+  return source.replace(/^export\s+/gm, "");
+}
+
 async function buildOffline() {
-  const entry = transformEntry(await readFile("src/client/entry.js", "utf8"));
-  return `window.__ModuleLoader__.load({ id: "deepseek-flow", factory: (require) => {\nvar module = { exports: {} }; var exports = module.exports;\n${entry}\nmodule.exports = { apply, inject };\nreturn module.exports; } });\n`;
+  const [entrySource, gateSource] = await Promise.all([
+    readFile("src/client/entry.js", "utf8"),
+    readFile("lib/condition-gates.js", "utf8")
+  ]);
+  const entry = transformEntry(entrySource);
+  const gateLogic = transformGateLogic(gateSource);
+  return `window.__ModuleLoader__.load({ id: "deepseek-flow", factory: (require) => {\nvar module = { exports: {} }; var exports = module.exports;\n${gateLogic}\n${entry}\nmodule.exports = { apply, inject };\nreturn module.exports; } });\n`;
 }
 
 let wrapped;

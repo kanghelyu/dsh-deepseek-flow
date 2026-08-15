@@ -3,6 +3,14 @@
 // 主题：全部使用 dsw alias token（--dsw-alias-*），明暗主题自动跟随 webui
 
 import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback } from "react";
+import {
+  CONDITION_GATE_TYPES,
+  availableGateBranches,
+  conditionGateType,
+  gateBranchForEdge,
+  normalizeGateType,
+  validateGateBranch
+} from "../../lib/condition-gates.js";
 
 const inject = ["slots", "connection", "locale"];
 const CLIENT_REV = "__DEEPSEEK_FLOW_CLIENT_REV__";
@@ -70,7 +78,7 @@ function text(language) {
         zoomIn: "放大",
         zoomOut: "缩小",
         addNode: "新建流程框",
-        connectHint: "拖动流程框两侧圆点即可新建箭头",
+        connectHint: "拖动右侧圆点新建箭头；条件框会自动约束逻辑分支",
         nodeKind: {
           input: "输入",
           agent: "Agent",
@@ -83,6 +91,52 @@ function text(language) {
         prompt: "提示词",
         stage: "阶段",
         predicate: "谓词",
+        gateTypeLabel: "逻辑门类型",
+        gateType: {
+          ifElse: "是 / 否（IF / ELSE）",
+          and: "与门（AND）",
+          or: "或门（OR）",
+          not: "非门（NOT）",
+          nand: "与非门（NAND）",
+          nor: "或非门（NOR）",
+          xor: "异或门（XOR）",
+          xnor: "同或门（XNOR）"
+        },
+        gateDescription: {
+          ifElse: "最多两条箭头：是、否各一条",
+          and: "可连接多个目标，箭头自动标注“与”",
+          or: "可连接多个目标，箭头自动标注“或”",
+          not: "只允许一条箭头，自动标注“非”",
+          nand: "可连接多个目标，箭头自动标注“与非”",
+          nor: "可连接多个目标，箭头自动标注“或非”",
+          xor: "可连接多个目标，箭头自动标注“异或”",
+          xnor: "可连接多个目标，箭头自动标注“同或”"
+        },
+        chooseGateTitle: "选择条件框的逻辑门",
+        chooseGateIntro: "门类型会决定箭头标签和允许连接的数量。创建后仍可在没有出线时修改。",
+        chooseBranchTitle: "选择判断分支",
+        chooseBranchIntro: "“是”和“否”各只能连接一个目标。",
+        connectionWarningTitle: "无法创建箭头",
+        branchLabel: {
+          true: "是",
+          false: "否",
+          and: "与",
+          or: "或",
+          not: "非",
+          nand: "与非",
+          nor: "或非",
+          xor: "异或",
+          xnor: "同或"
+        },
+        cancel: "取消",
+        dismiss: "知道了",
+        duplicateConnection: "这两个流程框之间已经存在箭头，不能重复连接。",
+        ifElseFull: "这个是/否条件已经有两条分支，不能再拉出第三条箭头。",
+        notFull: "非门只允许一条出线，不能再创建箭头。",
+        branchUsed: "这个分支已经连接过目标；“是”和“否”各只能使用一次。",
+        gateMismatch: "箭头逻辑与当前门类型不匹配。",
+        gateChangeBlocked: "该条件框已有出线。请先删除这些箭头，再修改逻辑门类型。",
+        invalidConnection: "这条箭头不符合当前条件门规则。",
         model: "模型",
         provider: "Provider",
         outputSchema: "输出 Schema (JSON)",
@@ -182,7 +236,7 @@ function text(language) {
         zoomIn: "Zoom in",
         zoomOut: "Zoom out",
         addNode: "New flow box",
-        connectHint: "Drag between the side handles to create an arrow",
+        connectHint: "Drag from the right handle; condition gates enforce their own branch rules",
         nodeKind: {
           input: "Input",
           agent: "Agent",
@@ -195,6 +249,52 @@ function text(language) {
         prompt: "Prompt",
         stage: "Stage",
         predicate: "Predicate",
+        gateTypeLabel: "Logic gate",
+        gateType: {
+          ifElse: "Yes / No (IF / ELSE)",
+          and: "AND gate",
+          or: "OR gate",
+          not: "NOT gate",
+          nand: "NAND gate",
+          nor: "NOR gate",
+          xor: "XOR gate",
+          xnor: "XNOR gate"
+        },
+        gateDescription: {
+          ifElse: "Up to two arrows: one Yes and one No",
+          and: "Connect multiple targets; arrows are labeled AND automatically",
+          or: "Connect multiple targets; arrows are labeled OR automatically",
+          not: "Exactly one outgoing arrow, labeled NOT automatically",
+          nand: "Connect multiple targets; arrows are labeled NAND automatically",
+          nor: "Connect multiple targets; arrows are labeled NOR automatically",
+          xor: "Connect multiple targets; arrows are labeled XOR automatically",
+          xnor: "Connect multiple targets; arrows are labeled XNOR automatically"
+        },
+        chooseGateTitle: "Choose a logic gate",
+        chooseGateIntro: "The gate controls arrow labels and outgoing connection limits. You can change it later while it has no outgoing arrows.",
+        chooseBranchTitle: "Choose a decision branch",
+        chooseBranchIntro: "Yes and No can each connect to one target only.",
+        connectionWarningTitle: "Cannot create arrow",
+        branchLabel: {
+          true: "Yes",
+          false: "No",
+          and: "AND",
+          or: "OR",
+          not: "NOT",
+          nand: "NAND",
+          nor: "NOR",
+          xor: "XOR",
+          xnor: "XNOR"
+        },
+        cancel: "Cancel",
+        dismiss: "Got it",
+        duplicateConnection: "An arrow already connects these two boxes.",
+        ifElseFull: "This Yes/No condition already has both branches; a third arrow is not allowed.",
+        notFull: "A NOT gate allows only one outgoing arrow.",
+        branchUsed: "That branch is already connected; Yes and No can each be used once.",
+        gateMismatch: "The arrow logic does not match the selected gate.",
+        gateChangeBlocked: "This condition already has outgoing arrows. Delete them before changing the logic gate.",
+        invalidConnection: "This arrow violates the current condition-gate rules.",
         model: "Model",
         provider: "Provider",
         outputSchema: "Output schema (JSON)",
@@ -428,10 +528,19 @@ const styles = String.raw`
 .df-assistant__preview textarea{flex:1;min-height:0;resize:none;overflow:auto;overscroll-behavior:contain;border:0;border-radius:0 0 12px 12px;padding:10px 12px;font:10px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--df-bg);scrollbar-width:thin}
 .df-assistant__pending{flex:1;min-height:0;display:grid;place-items:center;padding:18px;color:var(--df-ink-2);font-size:11px;text-align:center;overflow:auto}
 .df-confirm-backdrop{position:absolute;z-index:40;inset:0;display:grid;place-items:center;padding:20px;background:color-mix(in srgb,var(--df-bg) 72%,transparent);backdrop-filter:blur(4px)}
-.df-confirm{width:min(440px,100%);padding:18px;border:1px solid var(--df-border-strong);border-radius:14px;background:var(--df-layer);box-shadow:0 20px 60px color-mix(in srgb,var(--df-ink) 18%,transparent)}
+.df-confirm{width:min(540px,100%);max-height:calc(100vh - 40px);overflow:auto;padding:18px;border:1px solid var(--df-border-strong);border-radius:14px;background:var(--df-layer);box-shadow:0 20px 60px color-mix(in srgb,var(--df-ink) 18%,transparent)}
 .df-confirm h3{margin:0 0 8px;font-size:15px;color:var(--df-ink)}
 .df-confirm p{margin:0;color:var(--df-ink-2);font-size:12px;line-height:1.65}
 .df-confirm__actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.df-gate-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:14px}
+.deepseek-flow-root .df-gate-choice{display:flex;min-height:82px;flex-direction:column;align-items:flex-start;gap:5px;text-align:left;border:1px solid var(--df-border-strong);border-radius:11px;background:var(--df-layer-2);color:var(--df-ink);padding:11px;cursor:pointer}
+.deepseek-flow-root .df-gate-choice:hover,.deepseek-flow-root .df-gate-choice:focus-visible{border-color:var(--df-brand);background:color-mix(in srgb,var(--df-brand) 7%,var(--df-layer-2));outline:0}
+.df-gate-choice strong{font-size:12px;color:var(--df-brand)}
+.df-gate-choice span{font-size:10px;line-height:1.45;color:var(--df-ink-2)}
+.df-branch-options{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.deepseek-flow-root .df-branch-option{min-height:54px;border:1px solid var(--df-border-strong);border-radius:11px;background:var(--df-layer-2);color:var(--df-ink);font-size:14px;font-weight:750;cursor:pointer}
+.deepseek-flow-root .df-branch-option:hover:not(:disabled),.deepseek-flow-root .df-branch-option:focus-visible:not(:disabled){border-color:var(--df-brand);color:var(--df-brand);outline:0}
+.deepseek-flow-root .df-branch-option:disabled{opacity:.38;cursor:not-allowed;text-decoration:line-through}
 .df-import-hidden{display:none}
 [data-conversation-scroll][data-deepseek-flow-immersive="true"]{--dsh-composer-height:0px!important;overflow:hidden!important}
 [data-conversation-scroll][data-deepseek-flow-immersive="true"]>[data-composer-seat]{display:none!important}
@@ -442,10 +551,14 @@ const styles = String.raw`
 `;
 
 // ============ 自定义节点 ============
-function FlowNode({ data, selected }) {
+function FlowNode({ data, selected, language }) {
   const kind = data.kind ?? "agent";
+  const copy = text(language ?? data.language ?? browserLanguage());
+  const kindLabel = kind === "condition"
+    ? `${copy.nodeKind[kind]} · ${copy.gateType[normalizeGateType(data.gateType)]}`
+    : copy.nodeKind[kind] ?? kind;
   const children = [
-    React.createElement("div", { className: "df-node__kind" }, text(browserLanguage()).nodeKind[kind] ?? kind),
+    React.createElement("div", { className: "df-node__kind" }, kindLabel),
     React.createElement("div", { className: "df-node__label" }, String(data.label ?? kind)),
     (data.prompt || data.instructions) ? React.createElement("div", { className: "df-node__prompt" }, String(data.prompt ?? data.instructions)) : null,
     data.docPath ? React.createElement("div", { className: "df-node__file" }, String(data.docPath)) : null
@@ -481,6 +594,7 @@ function graphEdgeGeometry(edge, byId) {
 function GraphCanvas({
   nodes,
   edges,
+  language,
   selectedNode,
   selectedEdge,
   onInit,
@@ -490,6 +604,7 @@ function GraphCanvas({
   onEdgeSelect,
   onPaneClick,
   onConnect,
+  onConnectionRejected,
   isValidConnection,
   fitLabel,
   zoomInLabel,
@@ -679,7 +794,10 @@ function GraphCanvas({
       const targetElement = document.elementFromPoint(next.clientX, next.clientY)?.closest?.("[data-df-target-id]");
       const target = targetElement?.getAttribute("data-df-target-id") ?? null;
       const connection = { source, target, sourceHandle: null, targetHandle: null };
-      if (target && isValidConnection?.(connection)) onConnect?.(connection);
+      if (target) {
+        if (isValidConnection?.(connection) ?? true) onConnect?.(connection);
+        else onConnectionRejected?.(connection);
+      }
       setConnectionDraft(null);
       stopGesture();
     };
@@ -689,7 +807,7 @@ function GraphCanvas({
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [byId, isValidConnection, onConnect, screenToWorld, stopGesture]);
+  }, [byId, isValidConnection, onConnect, onConnectionRejected, screenToWorld, stopGesture]);
 
   // 画布滚轮/手势：原生 non-passive 监听，preventDefault 才真正生效——
   // 画布内的一切滚动/缩放手势只作用于画布，不再外溢为页面滚动或浏览器缩放。
@@ -730,6 +848,9 @@ function GraphCanvas({
     const geometry = graphEdgeGeometry(edge, byId);
     if (!geometry) continue;
     const selected = selectedEdge === edge.id;
+    const displayLabel = edge.autoLogicLabel
+      ? branchDisplayLabel(gateBranchForEdge(edge), language)
+      : edge.label;
     edgeElements.push(
       React.createElement("g", { key: edge.id, className: "df-graph__edge-group", "data-edge-id": edge.id },
         React.createElement("path", {
@@ -746,9 +867,9 @@ function GraphCanvas({
             onEdgeSelect?.(edge.id);
           }
         }),
-        edge.label ? React.createElement("g", { transform: `translate(${geometry.label.x} ${geometry.label.y})` },
+        displayLabel ? React.createElement("g", { transform: `translate(${geometry.label.x} ${geometry.label.y})` },
           React.createElement("rect", { className: "df-graph__label-bg", x: -18, y: -10, width: 36, height: 20, rx: 7 }),
-          React.createElement("text", { className: "df-graph__label", x: 0, y: 1 }, String(edge.label))
+          React.createElement("text", { className: "df-graph__label", x: 0, y: 1 }, String(displayLabel))
         ) : null
       )
     );
@@ -797,7 +918,7 @@ function GraphCanvas({
           onNodeSelect?.(node.id);
         }
       },
-        React.createElement(FlowNode, { data: node.data, selected: selectedNode === node.id }),
+        React.createElement(FlowNode, { data: node.data, selected: selectedNode === node.id, language }),
         React.createElement("button", {
           type: "button",
           className: "df-graph__handle df-graph__handle--target",
@@ -822,23 +943,38 @@ function GraphCanvas({
   );
 }
 
-function flowToCanvasNodes(flow) {
+function branchDisplayLabel(branch, language = browserLanguage()) {
+  return text(language).branchLabel[branch] ?? String(branch ?? "");
+}
+
+function flowToCanvasNodes(flow, language = browserLanguage()) {
   return (flow?.nodes ?? []).map((node) => ({
     id: node.id,
     type: "flow",
     position: node.position ?? { x: 120, y: 80 },
-    data: { ...node.data, kind: node.kind, docPath: flow?.docs?.[node.id] ?? "" }
+    data: {
+      ...node.data,
+      kind: node.kind,
+      ...(node.kind === "condition"
+        ? { gateType: conditionGateType(node, (flow?.edges ?? []).filter((edge) => edge.source === node.id)) }
+        : {}),
+      docPath: flow?.docs?.[node.id] ?? "",
+      language
+    }
   }));
 }
 
 function flowToCanvasEdges(edges, language = browserLanguage()) {
-  return (edges ?? []).map((edge) => ({
-    ...edge,
-    type: "workflow",
-    ...(edge.label ? { label: edge.label } : {}),
-    ...(!edge.label && edge.sourceHandle === "true" ? { label: language === "zh" ? "是" : "Yes" } : {}),
-    ...(!edge.label && edge.sourceHandle === "false" ? { label: language === "zh" ? "否" : "No" } : {})
-  }));
+  return (edges ?? []).map((edge) => {
+    const branch = gateBranchForEdge(edge);
+    const generatedLabel = !edge.label && branch ? branchDisplayLabel(branch, language) : null;
+    return {
+      ...edge,
+      type: "workflow",
+      ...(edge.label ? { label: edge.label } : {}),
+      ...(generatedLabel ? { label: generatedLabel, autoLogicLabel: true } : {})
+    };
+  });
 }
 
 function serializeFlow(currentFlow, nodes, edges) {
@@ -846,7 +982,7 @@ function serializeFlow(currentFlow, nodes, edges) {
     id: node.id,
     kind: node.data.kind ?? "agent",
     position: node.position,
-    data: Object.fromEntries(Object.entries(node.data).filter(([key]) => key !== "kind" && key !== "docPath"))
+    data: Object.fromEntries(Object.entries(node.data).filter(([key]) => key !== "kind" && key !== "docPath" && key !== "language"))
   }));
   return {
     ...currentFlow,
@@ -855,12 +991,43 @@ function serializeFlow(currentFlow, nodes, edges) {
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      ...(edge.label ? { label: edge.label } : {}),
+      ...(!edge.autoLogicLabel && edge.label ? { label: edge.label } : {}),
       ...(edge.sourceHandle === null || edge.sourceHandle === undefined ? {} : { sourceHandle: edge.sourceHandle })
     })),
     inputs: serializedNodes.filter((node) => node.kind === "input").map((node) => node.id),
     outputs: serializedNodes.filter((node) => node.kind === "output").map((node) => node.id)
   };
+}
+
+function connectionProblem(nodes, edges, connection, branch = null) {
+  if (!connection?.source || !connection?.target) return { valid: false, code: "invalidConnection" };
+  if (connection.source === connection.target) return { valid: false, code: "invalidConnection" };
+  if (edges.some((edge) => edge.source === connection.source && edge.target === connection.target && edge.id !== connection.edgeId)) {
+    return { valid: false, code: "duplicateConnection" };
+  }
+  const sourceNode = nodes.find((node) => node.id === connection.source);
+  const targetNode = nodes.find((node) => node.id === connection.target);
+  if (!sourceNode || !targetNode) return { valid: false, code: "invalidConnection" };
+  if (sourceNode.data?.kind !== "condition") return { valid: true, code: "ok" };
+  const outgoing = edges.filter((edge) => edge.source === connection.source);
+  const gateType = conditionGateType(sourceNode, outgoing);
+  const available = availableGateBranches(gateType, outgoing, connection.edgeId ?? null);
+  if (branch === null || branch === undefined) {
+    if (available.length > 0) return { valid: true, code: "ok", gateType, available };
+    return { valid: false, code: gateType === "ifElse" ? "ifElseFull" : "notFull", gateType, available };
+  }
+  const result = validateGateBranch(gateType, outgoing, branch, connection.edgeId ?? null);
+  return result.valid ? { ...result, available } : result;
+}
+
+function connectionProblemMessage(problem, copy) {
+  if (!problem || problem.valid) return "";
+  if (problem.code === "duplicateConnection") return copy.duplicateConnection;
+  if (problem.code === "ifElseFull") return copy.ifElseFull;
+  if (problem.code === "gateLimit" || problem.code === "notFull") return copy.notFull;
+  if (problem.code === "branchUsed") return copy.branchUsed;
+  if (problem.code === "logicMismatch") return copy.gateMismatch;
+  return copy.invalidConnection;
 }
 
 function graphSnapshot(nodes, edges) {
@@ -918,6 +1085,7 @@ function logicSnapshot(flow) {
       id: node.id,
       kind: node.kind,
       label: node.data?.label ?? "",
+      gateType: node.kind === "condition" ? normalizeGateType(node.data?.gateType) : "",
       content: node.kind === "agent" || node.kind === "mapAgent"
         ? String(node.data?.prompt ?? "")
         : String(node.data?.instructions ?? "")
@@ -926,7 +1094,7 @@ function logicSnapshot(flow) {
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      sourceHandle: edge.sourceHandle ?? "",
+      sourceHandle: gateBranchForEdge(edge) ?? "",
       targetHandle: edge.targetHandle ?? ""
     }))
   });
@@ -982,6 +1150,9 @@ function Studio({ connection, sessionId, language }) {
   const [message, setMessage] = useState(t.ready);
   const [dirty, setDirty] = useState(false);
   const [flowInstance, setFlowInstance] = useState(null);
+  const [gatePickerOpen, setGatePickerOpen] = useState(false);
+  const [pendingConnection, setPendingConnection] = useState(null);
+  const [connectionWarning, setConnectionWarning] = useState(null);
   const [assistantOpen, setAssistantOpen] = useState(() => storedBoolean("deepseek-flow:assistant-open", false));
   const [assistantHeight, setAssistantHeight] = useState(() => storedNumber("deepseek-flow:assistant-height", ASSISTANT_DEFAULT));
   const [assistantBusy, setAssistantBusy] = useState(null);
@@ -1149,7 +1320,7 @@ function Studio({ connection, sessionId, language }) {
     if (!flow) return;
     currentIdRef.current = flow.id;
     setCurrentId(flow.id);
-    setNodes(flowToCanvasNodes(flow));
+    setNodes(flowToCanvasNodes(flow, language));
     setEdges(flowToCanvasEdges(flow.edges, language));
     historyRef.current = { past: [], future: [] };
     setSelectedEdge(null);
@@ -1418,24 +1589,70 @@ function Studio({ connection, sessionId, language }) {
     restoreGraph(next);
   }, [restoreGraph]);
 
-  const onConnect = useCallback((conn) => {
-    rememberGraph();
-    setEdges((eds) => [...eds, {
+  const showConnectionWarning = useCallback((problem) => {
+    const warning = typeof problem === "string" ? problem : connectionProblemMessage(problem, t);
+    setMessage(warning || t.invalidConnection);
+    setConnectionWarning(warning || t.invalidConnection);
+  }, [t]);
+
+  const commitConnection = useCallback((conn, requestedBranch = null) => {
+    const problem = connectionProblem(nodesRef.current, edgesRef.current, conn, requestedBranch);
+    if (!problem.valid) {
+      showConnectionWarning(problem);
+      return false;
+    }
+    const sourceNode = nodesRef.current.find((node) => node.id === conn.source);
+    const condition = sourceNode?.data?.kind === "condition";
+    const branch = condition ? problem.branch : null;
+    const edge = {
       ...conn,
       id: `e-${Math.random().toString(36).slice(2, 9)}`,
-      type: "workflow"
-    }]);
+      type: "workflow",
+      ...(condition ? {
+        sourceHandle: branch,
+        label: branchDisplayLabel(branch, language),
+        autoLogicLabel: true
+      } : {})
+    };
+    rememberGraph();
+    const nextEdges = [...edgesRef.current, edge];
+    edgesRef.current = nextEdges;
+    setEdges(nextEdges);
     ++documentRevisionRef.current;
     setDirty(true);
-  }, [rememberGraph]);
+    return true;
+  }, [language, rememberGraph, setEdges, showConnectionWarning]);
+
+  const onConnect = useCallback((conn) => {
+    const problem = connectionProblem(nodesRef.current, edgesRef.current, conn);
+    if (!problem.valid) {
+      showConnectionWarning(problem);
+      return;
+    }
+    const sourceNode = nodesRef.current.find((node) => node.id === conn.source);
+    if (sourceNode?.data?.kind !== "condition") {
+      commitConnection(conn);
+      return;
+    }
+    const gateType = conditionGateType(sourceNode, edgesRef.current.filter((edge) => edge.source === conn.source));
+    if (gateType === "ifElse") {
+      setPendingConnection({ connection: conn, available: problem.available ?? [] });
+      return;
+    }
+    commitConnection(conn, gateType);
+  }, [commitConnection, showConnectionWarning]);
+
+  const onConnectionRejected = useCallback((conn) => {
+    showConnectionWarning(connectionProblem(nodesRef.current, edgesRef.current, conn));
+  }, [showConnectionWarning]);
 
   const onReconnect = useCallback((oldEdge, connectionParams) => {
     rememberGraph();
     setEdges((items) => reconnectFlowEdge(oldEdge, connectionParams, items).map((edge) => edge.id === oldEdge.id
       ? {
           ...edge,
-          label: connectionParams.sourceHandle === "true" ? (language === "zh" ? "是" : "Yes")
-            : connectionParams.sourceHandle === "false" ? (language === "zh" ? "否" : "No") : undefined
+          label: branchDisplayLabel(gateBranchForEdge(connectionParams), language),
+          autoLogicLabel: true
         }
       : edge));
     ++documentRevisionRef.current;
@@ -1443,9 +1660,7 @@ function Studio({ connection, sessionId, language }) {
   }, [language, rememberGraph, setEdges]);
 
   const isValidConnection = useCallback((connectionParams) => {
-    if (!connectionParams.source || !connectionParams.target || connectionParams.source === connectionParams.target) return false;
-    return !edgesRef.current.some((edge) => edge.source === connectionParams.source
-      && edge.target === connectionParams.target);
+    return connectionProblem(nodesRef.current, edgesRef.current, connectionParams).valid;
   }, []);
 
   const moveNode = useCallback((id, position) => {
@@ -1454,7 +1669,7 @@ function Studio({ connection, sessionId, language }) {
     setDirty(true);
   }, []);
 
-  const addNode = (kind) => {
+  const createNode = (kind, gateType = null) => {
     rememberGraph();
     const id = `${kind}-${Math.random().toString(36).slice(2, 7)}`;
     const node = {
@@ -1464,10 +1679,14 @@ function Studio({ connection, sessionId, language }) {
       data: {
         kind,
         label: t.nodeKind[kind] ?? kind,
+        language,
+        ...(kind === "condition" ? { gateType: normalizeGateType(gateType) } : {}),
         ...(kind === "agent" || kind === "mapAgent" ? { prompt: "{{input}}" } : {})
       }
     };
-    setNodes((nds) => [...nds, node]);
+    const nextNodes = [...nodesRef.current, node];
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
     setSelected(id);
     setSelectedEdge(null);
     setActiveDoc(id);
@@ -1475,15 +1694,33 @@ function Studio({ connection, sessionId, language }) {
     setDirty(true);
   };
 
+  const addNode = (kind) => {
+    if (kind === "condition") {
+      setGatePickerOpen(true);
+      return;
+    }
+    createNode(kind);
+  };
+
   const patchSelected = (patch) => {
     const nextNodes = nodes.map((node) => node.id === selected ? { ...node, data: { ...node.data, ...patch } } : node);
     setNodes(nextNodes);
+    nodesRef.current = nextNodes;
     setDirty(true);
     if (Object.hasOwn(patch, "prompt") || Object.hasOwn(patch, "instructions")) {
       scheduleDocumentSave(currentFlow, nextNodes, edges);
     } else {
       ++documentRevisionRef.current;
     }
+  };
+
+  const patchGateType = (gateType) => {
+    if (!selectedNode || selectedNode.data.kind !== "condition") return;
+    if (edgesRef.current.some((edge) => edge.source === selectedNode.id)) {
+      showConnectionWarning(t.gateChangeBlocked);
+      return;
+    }
+    patchSelected({ gateType: normalizeGateType(gateType) });
   };
 
   // 文档驱动：把选中节点绑定到 docRoot 下的 MD 文件（空值解除绑定）。
@@ -1574,7 +1811,7 @@ function Studio({ connection, sessionId, language }) {
       currentIdRef.current = flow.id;
       setCurrentId(flow.id);
       setFlows((fs) => [flow, ...fs.filter((f) => f.id !== flow.id)]);
-      setNodes(flowToCanvasNodes(flow));
+      setNodes(flowToCanvasNodes(flow, language));
       setEdges(flowToCanvasEdges(flow.edges, language));
       setSelected(null);
       setActiveDoc("workflow");
@@ -2009,6 +2246,13 @@ function Studio({ connection, sessionId, language }) {
             React.createElement("input", { value: currentFlow?.docs?.[selected] ?? "", placeholder: "01-step/STEP.md", onChange: (e) => patchDoc(e.target.value) })
           ),
           selectedNode.data.kind === "condition" &&
+            React.createElement("label", { key: "gateType" }, t.gateTypeLabel,
+              React.createElement("select", {
+                value: normalizeGateType(selectedNode.data.gateType),
+                onChange: (event) => patchGateType(event.target.value)
+              }, CONDITION_GATE_TYPES.map((gateType) => React.createElement("option", { key: gateType, value: gateType }, t.gateType[gateType])))
+            ),
+          selectedNode.data.kind === "condition" &&
             React.createElement("label", { key: "predicate" }, t.predicate,
               React.createElement("select", { value: selectedNode.data.predicate ?? "truthy", onChange: (e) => patchSelected({ predicate: e.target.value }) },
                 ["truthy", "falsy", "nonEmpty"].map((p) => React.createElement("option", { key: p, value: p }, p))
@@ -2224,6 +2468,83 @@ function Studio({ connection, sessionId, language }) {
     )
   );
 
+  const gatePickerDialog = gatePickerOpen && React.createElement("div", {
+    className: "df-confirm-backdrop",
+    role: "presentation",
+    onPointerDown: (event) => {
+      if (event.target === event.currentTarget) setGatePickerOpen(false);
+    }
+  },
+    React.createElement("div", { className: "df-confirm", role: "dialog", "aria-modal": "true", "aria-labelledby": "df-gate-picker-title" },
+      React.createElement("h3", { id: "df-gate-picker-title" }, t.chooseGateTitle),
+      React.createElement("p", null, t.chooseGateIntro),
+      React.createElement("div", { className: "df-gate-grid" },
+        CONDITION_GATE_TYPES.map((gateType) => React.createElement("button", {
+          key: gateType,
+          type: "button",
+          className: "df-gate-choice",
+          "data-df-gate-type": gateType,
+          onClick: () => {
+            setGatePickerOpen(false);
+            createNode("condition", gateType);
+          }
+        },
+          React.createElement("strong", null, t.gateType[gateType]),
+          React.createElement("span", null, t.gateDescription[gateType])
+        ))
+      ),
+      React.createElement("div", { className: "df-confirm__actions" },
+        React.createElement("button", { className: "df-btn", onClick: () => setGatePickerOpen(false) }, t.cancel)
+      )
+    )
+  );
+
+  const branchPickerDialog = pendingConnection && React.createElement("div", {
+    className: "df-confirm-backdrop",
+    role: "presentation",
+    onPointerDown: (event) => {
+      if (event.target === event.currentTarget) setPendingConnection(null);
+    }
+  },
+    React.createElement("div", { className: "df-confirm", role: "dialog", "aria-modal": "true", "aria-labelledby": "df-branch-picker-title" },
+      React.createElement("h3", { id: "df-branch-picker-title" }, t.chooseBranchTitle),
+      React.createElement("p", null, t.chooseBranchIntro),
+      React.createElement("div", { className: "df-branch-options" },
+        ["true", "false"].map((branch) => React.createElement("button", {
+          key: branch,
+          type: "button",
+          className: "df-branch-option",
+          "data-df-branch": branch,
+          disabled: !pendingConnection.available.includes(branch),
+          onClick: () => {
+            const conn = pendingConnection.connection;
+            setPendingConnection(null);
+            commitConnection(conn, branch);
+          }
+        }, t.branchLabel[branch]))
+      ),
+      React.createElement("div", { className: "df-confirm__actions" },
+        React.createElement("button", { className: "df-btn", onClick: () => setPendingConnection(null) }, t.cancel)
+      )
+    )
+  );
+
+  const connectionWarningDialog = connectionWarning && React.createElement("div", {
+    className: "df-confirm-backdrop",
+    role: "presentation",
+    onPointerDown: (event) => {
+      if (event.target === event.currentTarget) setConnectionWarning(null);
+    }
+  },
+    React.createElement("div", { className: "df-confirm", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "df-connection-warning-title" },
+      React.createElement("h3", { id: "df-connection-warning-title" }, t.connectionWarningTitle),
+      React.createElement("p", null, connectionWarning),
+      React.createElement("div", { className: "df-confirm__actions" },
+        React.createElement("button", { className: "df-btn is-primary", onClick: () => setConnectionWarning(null) }, t.dismiss)
+      )
+    )
+  );
+
   const panelBudget = Math.max(0, studioWidth - 340 - 18);
   let effectiveDocumentWidth = documentsOpen ? Math.min(documentWidth, studioWidth * 0.42) : 0;
   let effectiveInspectorWidth = inspectorOpen ? Math.min(inspectorWidth, studioWidth * 0.46) : 0;
@@ -2290,10 +2611,14 @@ function Studio({ connection, sessionId, language }) {
     leftSplitter,
     React.createElement("div", { className: "df-canvas-shell", ref: canvasShellRef },
       workflowConfirmDialog,
+      gatePickerDialog,
+      branchPickerDialog,
+      connectionWarningDialog,
       toolbar,
       React.createElement(GraphCanvas, {
         nodes,
         edges,
+        language,
         selectedNode: selected,
         selectedEdge,
         onInit: setFlowInstance,
@@ -2314,6 +2639,7 @@ function Studio({ connection, sessionId, language }) {
           setSelectedEdge(null);
         },
         onConnect,
+        onConnectionRejected,
         onReconnect,
         isValidConnection,
         fitLabel: t.fitAll,

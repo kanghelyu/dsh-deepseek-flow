@@ -24,6 +24,9 @@ DeepSeekFlow 只编辑流程图、`WORKFLOW.md` 与各步骤 `STEP.md`。它可�
 ## 画布与主题红线
 
 - 原生 SVG 边层继续强制 `fill:none!important`；每个节点恰好两个贴边端口，箭头使用闭合主题色 marker，禁止恢复常驻 Minimap。
+- 新建条件框必须先选择 `ifElse / and / or / not / nand / nor / xor / xnor`。`ifElse` 只允许 `true` 与 `false` 各一条；`not` 只允许一条；其余基础门可连接多个不同目标并自动标注。
+- 所有条件出线通过 `sourceHandle` 持久化逻辑分支；显示标签可以本地化，但不得把自动标签固化为单一语言。重复目标、重复分支和超限出线必须在写入前弹窗拦截。
+- 条件框已有出线时不得直接切换门类型，必须先删除出线，避免旧箭头被静默改义。
 - 左右栏由 9px 分隔边拖动，低于 108px 自动收纳；Flow 挂载时隐藏当前会话 composer，卸载时恢复。
 - 颜色只使用 Harness `--dsw-alias-*` token，必须同时检查暗色、亮色与窄屏。
 
