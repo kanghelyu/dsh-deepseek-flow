@@ -358,7 +358,7 @@ const styles = String.raw`
 .df-inspector label{display:grid;gap:4px;color:var(--df-ink-2);font-size:12px}
 .df-inspector input,.df-inspector select,.df-inspector textarea{width:100%;border:1px solid var(--df-border-strong);border-radius:7px;background:var(--df-layer-2);color:var(--df-ink);padding:6px 8px;outline:0}
 .df-inspector textarea{min-height:92px;resize:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55}
-.df-inspector textarea.df-markdown-editor{min-height:300px;resize:none;background:var(--df-bg);border-radius:10px;field-sizing:content}
+.df-inspector textarea.df-markdown-editor{min-height:300px;max-height:60vh;resize:none;background:var(--df-bg);border-radius:10px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .df-advanced{border:1px solid var(--df-border);border-radius:9px;background:var(--df-layer-2);padding:0 9px}
 .df-advanced summary{cursor:pointer;padding:8px 0;color:var(--df-ink-2);font-size:11px;font-weight:650}
 .df-advanced__content{display:grid;gap:9px;padding:0 0 10px}
@@ -388,7 +388,7 @@ const styles = String.raw`
 .df-assistant__safe{font-size:9px;color:var(--df-ink-2);white-space:nowrap}
 .df-assistant__target{max-width:190px;padding:3px 8px;border:1px solid var(--df-border);border-radius:999px;color:var(--df-ink-2);font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .df-assist-menu-wrap{position:relative;display:flex;align-items:center;flex:none}
- .df-assist-menu-btn{display:inline-flex;align-items:center;gap:7px;max-width:280px;border:1px solid var(--df-border-strong);border-radius:999px;background:var(--df-layer-2);color:var(--df-ink);padding:5px 13px;font-size:11px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .df-assist-menu-btn{display:inline-flex;align-items:center;gap:5px;max-width:170px;border:1px solid var(--df-border-strong);border-radius:999px;background:var(--df-layer-2);color:var(--df-ink);padding:3px 9px;font-size:10px;line-height:1.4;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .df-assist-menu-btn:hover{border-color:var(--df-brand)}
  .df-assist-menu-caret{font-size:8px;color:var(--df-ink-2);flex:none}
  .df-assist-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:40;min-width:230px;max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:6px;border:1px solid var(--df-border-strong);border-radius:14px;background:var(--df-layer);box-shadow:0 14px 36px color-mix(in srgb,var(--df-ink) 16%,transparent)}
