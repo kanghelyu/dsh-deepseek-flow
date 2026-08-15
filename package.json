@@ -1,6 +1,6 @@
 {
   "name": "deepseek-flow",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "DeepSeekFlow — per-session visual workflow plugin for DeepSeek Harness: canvas ↔ WORKFLOW.md/STEP.md two-way sync, AI review/optimize, theme-following UI.",
   "type": "module",
   "main": "lib/index.js",
