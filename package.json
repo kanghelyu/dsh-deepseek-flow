@@ -12,17 +12,11 @@
   },
   "files": [
     "lib",
-    "src",
     "scripts",
-    "test",
-    "examples",
-    "qa/*v9*.png",
-    "README.md",
-    "QA-REPORT.md",
-    "HANDOFF-0.3.5.md",
     "cordis.patch.yml",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml"
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
   ],
   "dsh": {
     "bundle": {
