@@ -1136,7 +1136,7 @@ function Studio({ connection, sessionId, language }) {
     }, 100);
   });
 
-  const appliedWorkflowAssistRef = useRef(null);
+  const appliedWorkflowAssistRef = React.useRef(null);
   const isWorkflowAssistApplied = (requestId) => {
     if (!appliedWorkflowAssistRef.current) {
       try {

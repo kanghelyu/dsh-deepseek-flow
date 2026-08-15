@@ -212,6 +212,18 @@ test("client manifest mirrors services and slot packages actually consumed", () 
   assert.ok(manifest.exports["./client"]);
 });
 
+test("client source imports every React hook it calls without a namespace", () => {
+  const entry = clientSources[0];
+  const namedImport = entry.match(/import React,\s*\{([^}]+)\}\s*from "react"/);
+  assert.ok(namedImport, "expected a named React import in the client entry");
+  const importedHooks = new Set(namedImport[1].split(",").map((name) => name.trim()));
+  for (const hook of ["useState", "useEffect", "useLayoutEffect", "useMemo", "useCallback", "useRef"]) {
+    if (new RegExp(`(?<!\\.)\\b${hook}\\s*\\(`).test(entry)) {
+      assert.ok(importedHooks.has(hook), `${hook} is called without React. but is not imported`);
+    }
+  }
+});
+
 test("DeepSeekFlow exposes only workflow tools and does not own unrelated vision execution", () => {
   assert.doesNotMatch(host, /vision_describe|vision\.py|execFile/);
   assert.match(host, /name:\s*"flow_create"/);
