@@ -689,21 +689,38 @@ function GraphCanvas({
     };
   }, [byId, isValidConnection, onConnect, screenToWorld, stopGesture]);
 
-  const onWheel = useCallback((event) => {
-    event.preventDefault();
-    cancelViewportAnimation();
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const cursorX = event.clientX - rect.left;
-    const cursorY = event.clientY - rect.top;
-    updateViewport((current) => {
-      const zoom = clamp(current.zoom * Math.exp(-event.deltaY * 0.0012), GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM);
-      return {
-        x: cursorX - (cursorX - current.x) * (zoom / current.zoom),
-        y: cursorY - (cursorY - current.y) * (zoom / current.zoom),
-        zoom
-      };
-    });
+  // 画布滚轮/手势：原生 non-passive 监听，preventDefault 才真正生效——
+  // 画布内的一切滚动/缩放手势只作用于画布，不再外溢为页面滚动或浏览器缩放。
+  useEffect(() => {
+    const canvas = rootRef.current;
+    if (!canvas) return undefined;
+    const onCanvasWheel = (event) => {
+      event.preventDefault();
+      cancelViewportAnimation();
+      const rect = canvas.getBoundingClientRect();
+      const cursorX = event.clientX - rect.left;
+      const cursorY = event.clientY - rect.top;
+      if (event.ctrlKey || event.metaKey) {
+        // 缩放：Ctrl/⌘+滚轮，或触控板捏合（捏合手势带 ctrlKey）
+        updateViewport((current) => {
+          const zoom = clamp(current.zoom * Math.exp(-event.deltaY * 0.0012), GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM);
+          return {
+            x: cursorX - (cursorX - current.x) * (zoom / current.zoom),
+            y: cursorY - (cursorY - current.y) * (zoom / current.zoom),
+            zoom
+          };
+        });
+      } else {
+        // 平移：触控板双指滑动 / 鼠标滚轮
+        updateViewport((current) => ({
+          ...current,
+          x: current.x - (Number.isFinite(event.deltaX) ? event.deltaX : 0),
+          y: current.y - (Number.isFinite(event.deltaY) ? event.deltaY : 0)
+        }));
+      }
+    };
+    canvas.addEventListener("wheel", onCanvasWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onCanvasWheel);
   }, [cancelViewportAnimation, updateViewport]);
 
   const edgeElements = [];
@@ -746,8 +763,7 @@ function GraphCanvas({
   return React.createElement("div", {
     ref: rootRef,
     className: `df-canvas${panning ? " is-panning" : ""}`,
-    onPointerDown: beginPan,
-    onWheel
+    onPointerDown: beginPan
   },
     React.createElement("div", {
       className: "df-graph__stage",
