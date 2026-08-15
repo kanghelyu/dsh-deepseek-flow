@@ -33,7 +33,7 @@ test("logic Agent prompt contains every Markdown document and graph edge", () =>
   assert.match(prompt, /OUTPUT_ONLY/);
   assert.match(prompt, /\"source\":\"input\"/);
   assert.match(prompt, /\"logicContract\":\{\"version\":1/);
-  assert.match(prompt, /不能只把 AND\/OR\/XOR/);
+  assert.match(prompt, /不能只当箭头文字/);
   assert.match(prompt, /不要运行工作流/);
 });
 
@@ -51,7 +51,7 @@ test("whole-workflow optimization prompt includes every document and returns com
   assert.match(prompt, /INPUT_ONLY/);
   assert.match(prompt, /OUTPUT_ONLY/);
   assert.match(prompt, /保持标题/);
-  assert.match(prompt, /每一个节点文档各一次/);
+  assert.match(prompt, /每个节点文档各一次/);
   const result = normalizeWorkflowOptimizationResult(flow, {
     summary: "done",
     documents: [
