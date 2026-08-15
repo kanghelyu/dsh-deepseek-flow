@@ -118,8 +118,18 @@ test("bottom assistant manually delegates validation and optimization to a one-s
   assert.match(client, /runLogicValidation/);
   assert.match(client, /runDocumentOptimization/);
   assert.match(client, /runWorkflowOptimization/);
-  assert.match(client, /topologyDirty \? " is-disabled" : ""/);
-  assert.match(client, /onClick: runDocumentOptimization/);
+  assert.match(client, /topologyDirty && assistantBusy !== "logic" \? " is-disabled" : ""/);
+  assert.match(client, /topologyDirty && assistantBusy !== "optimize-workflow" \? " is-disabled" : ""/);
+  assert.match(client, /setCancelConfirm\(\{ mode: "logic" \}\)/);
+  assert.match(client, /setCancelConfirm\(\{ mode: "document" \}\)/);
+  assert.match(client, /setCancelConfirm\(\{ mode: "workflow" \}\)/);
+  assert.match(client, /cancelConfirm\.mode === "logic" \? t\.cancelConfirmLogic/);
+  assert.match(client, /"data-df-action": "confirm-cancel-agent"/);
+  assert.match(client, /"data-df-action": "wait-cancel"/);
+  assert.match(client, /t\.cancelValidation/);
+  assert.match(client, /entry\.status === "cancelled"/);
+  assert.doesNotMatch(client, /"data-df-action": "cancel-agent"/);
+  assert.doesNotMatch(client, /onClick: runDocumentOptimization/);
   assert.match(client, /"data-df-action": "logic-validation"/);
   assert.match(client, /"data-df-action": "optimize-document"/);
   assert.match(client, /"data-df-action": "optimize-workflow"/);
@@ -130,7 +140,6 @@ test("bottom assistant manually delegates validation and optimization to a one-s
   assert.match(client, /staleSuggestion/);
   assert.match(client, /sessionId, requestId, flow, mode: "logic"/);
   assert.match(client, /sessionId, requestId: agentRequestId, flow, mode: "optimize"/);
-  assert.match(client, /"data-df-action": "cancel-agent"/);
   assert.doesNotMatch(client, /Manual only|全程手动/);
   assert.doesNotMatch(client, /runAssistant\("debug"\)|staticDebug|Static debug|静态 Debug/);
   assert.doesNotMatch(client, /copyForSession|copySession/);

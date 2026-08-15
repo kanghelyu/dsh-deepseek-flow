@@ -145,6 +145,7 @@ function Studio({ connection, sessionId, language }) {
   const pollTimerRef = React.useRef(null);
   const topologyPollRef = React.useRef(null);
   const [workflowOptimizeConfirm, setWorkflowOptimizeConfirm] = useState(false);
+  const [cancelConfirm, setCancelConfirm] = useState(null);
   const [topologyApplyConfirm, setTopologyApplyConfirm] = useState(false);
   const [topologyApplyBusy, setTopologyApplyBusy] = useState(false);
   const [persistedTopologySignature, setPersistedTopologySignature] = useState("");
@@ -378,7 +379,9 @@ function Studio({ connection, sessionId, language }) {
               const requestId = entry.key.split(":").pop();
               setRunningDocs((prev) => { const next = new Map(prev); next.set(target, requestId); return next; });
               pollAssist(requestId, (finalEntry) => {
-                if (finalEntry.status === "done" && finalEntry.result) {
+                if (finalEntry.status === "cancelled") {
+                  if (assistantTargetRef.current === target) setMessage(t.assistantCancelled);
+                } else if (finalEntry.status === "done" && finalEntry.result) {
                   const proposal = { ...finalEntry.result, target: finalEntry.result.target ?? target, documentLabel: assistantDocLabel };
                   proposalStoreRef.current.set(target, proposal);
                   if (assistantTargetRef.current === target) {
@@ -400,7 +403,9 @@ function Studio({ connection, sessionId, language }) {
             const requestId = entry.key.split(":").pop();
             setAssistantBusy("logic");
             pollAssist(requestId, (finalEntry) => {
-              if (finalEntry.status === "done" && finalEntry.result) {
+              if (finalEntry.status === "cancelled") {
+                setMessage(t.assistantCancelled);
+              } else if (finalEntry.status === "done" && finalEntry.result) {
                 setValidationResult({
                   ...finalEntry.result,
                   snapshot: nodesRef.current ? { nodeIds: nodesRef.current.map((node) => node.id) } : [],
@@ -1037,7 +1042,9 @@ function Studio({ connection, sessionId, language }) {
       if (!accepted?.accepted) throw new Error("assist not accepted");
       pollTimerRef.current?.();
       pollTimerRef.current = pollAssist(requestId, (entry) => {
-        if (entry.status === "done" && entry.result) {
+        if (entry.status === "cancelled") {
+          setMessage(t.assistantCancelled);
+        } else if (entry.status === "done" && entry.result) {
           setValidationResult({ ...entry.result, snapshot: logicSnapshot(flow), checkedAt: new Date().toISOString() });
           setFindingFilter(null);
           setMessage(t.validationComplete);
@@ -1075,7 +1082,9 @@ function Studio({ connection, sessionId, language }) {
       if (!accepted?.accepted) throw new Error("assist not accepted");
       pollTimerRef.current?.();
       pollTimerRef.current = pollAssist(agentRequestId, (entry) => {
-        if (entry.status === "done" && entry.result) {
+        if (entry.status === "cancelled") {
+          if (assistantTargetRef.current === target) setMessage(t.assistantCancelled);
+        } else if (entry.status === "done" && entry.result) {
           // 需求 6：按文档 id 存入独立方案槽；当前选中文档才立即显示，否则切回时再显示。
           const proposal = { ...entry.result, target: entry.result.target ?? target, documentLabel };
           proposalStoreRef.current.set(target, proposal);
@@ -1131,6 +1140,12 @@ function Studio({ connection, sessionId, language }) {
       if (!accepted?.accepted) throw new Error("assist not accepted");
       pollTimerRef.current?.();
       pollTimerRef.current = pollAssist(agentRequestId, async (entry) => {
+        if (entry.status === "cancelled") {
+          setMessage(t.assistantCancelled);
+          activeAssistRef.current = null;
+          setAssistantBusy(null);
+          return;
+        }
         if (entry.status !== "done" || !entry.result) {
           setMessage(t.assistantFailed + String(entry.error ?? ""));
           activeAssistRef.current = null;
@@ -1554,24 +1569,40 @@ function Studio({ connection, sessionId, language }) {
       React.createElement("span", { className: "df-assistant__target", title: `${t.assistantTarget}: ${assistantDocLabel}` }, assistantDocLabel),
       React.createElement("div", { className: "df-assistant__actions" },
         React.createElement("button", {
-          className: `df-btn is-primary${topologyDirty ? " is-disabled" : ""}`,
+          className: `df-btn is-primary${topologyDirty && assistantBusy !== "logic" ? " is-disabled" : ""}`,
           "data-df-action": "logic-validation",
-          "aria-disabled": topologyDirty ? "true" : undefined,
-          onClick: () => { if (topologyDirty) { setMessage(t.topologyPending); return; } runLogicValidation(); }
-        }, assistantBusy === "logic" ? t.agentLogicBusy : t.logicValidation),
-        React.createElement("button", { className: "df-btn", "data-df-action": "optimize-document", disabled: !currentFlow, onClick: runDocumentOptimization }, runningDocs.get(assistantTarget) !== undefined ? t.agentOptimizeBusy : t.aiOptimize),
+          "aria-disabled": topologyDirty && assistantBusy !== "logic" ? "true" : undefined,
+          disabled: assistantBusy === "cancelling" && activeAssistRef.current?.mode === "logic",
+          onClick: () => {
+            if (assistantBusy === "logic") { setCancelConfirm({ mode: "logic" }); return; }
+            if (topologyDirty) { setMessage(t.topologyPending); return; }
+            runLogicValidation();
+          }
+        }, assistantBusy === "logic" ? t.cancelValidation
+          : assistantBusy === "cancelling" && activeAssistRef.current?.mode === "logic" ? "…"
+          : t.logicValidation),
         React.createElement("button", {
-          className: `df-btn${topologyDirty ? " is-disabled" : ""}`,
+          className: "df-btn",
+          "data-df-action": "optimize-document",
+          disabled: !currentFlow,
+          onClick: () => {
+            if (runningDocs.get(assistantTarget) !== undefined) { setCancelConfirm({ mode: "document" }); return; }
+            runDocumentOptimization();
+          }
+        }, runningDocs.get(assistantTarget) !== undefined ? t.cancelDocOptimize : t.aiOptimize),
+        React.createElement("button", {
+          className: `df-btn${topologyDirty && assistantBusy !== "optimize-workflow" ? " is-disabled" : ""}`,
           "data-df-action": "optimize-workflow",
-          "aria-disabled": topologyDirty ? "true" : undefined,
-          onClick: () => { if (topologyDirty) { setMessage(t.topologyPending); return; } setWorkflowOptimizeConfirm(true); }
-        }, assistantBusy === "optimize-workflow" ? t.agentWorkflowBusy : t.aiOptimizeWorkflow),
-        (assistantBusy || runningDocs.get(assistantTarget) !== undefined) && React.createElement("button", {
-          className: "df-btn is-ghost",
-          "data-df-action": "cancel-agent",
-          disabled: assistantBusy === "cancelling",
-          onClick: assistantBusy ? cancelAssistant : () => cancelOptimizeFor(assistantTarget)
-        }, assistantBusy === "cancelling" ? "…" : t.cancelAgent),
+          "aria-disabled": topologyDirty && assistantBusy !== "optimize-workflow" ? "true" : undefined,
+          disabled: assistantBusy === "cancelling" && activeAssistRef.current?.mode === "optimize-workflow",
+          onClick: () => {
+            if (assistantBusy === "optimize-workflow") { setCancelConfirm({ mode: "workflow" }); return; }
+            if (topologyDirty) { setMessage(t.topologyPending); return; }
+            setWorkflowOptimizeConfirm(true);
+          }
+        }, assistantBusy === "optimize-workflow" ? t.cancelWorkflowOptimize
+          : assistantBusy === "cancelling" && activeAssistRef.current?.mode === "optimize-workflow" ? "…"
+          : t.aiOptimizeWorkflow),
         React.createElement("button", {
           className: "df-btn df-assistant__toggle",
           title: assistantOpen ? t.collapseAssistant : t.expandAssistant,
@@ -1663,6 +1694,34 @@ function Studio({ connection, sessionId, language }) {
       React.createElement("div", { className: "df-confirm__actions" },
         React.createElement("button", { className: "df-btn", onClick: () => setWorkflowOptimizeConfirm(false) }, t.workflowOptimizeCancel),
         React.createElement("button", { className: "df-btn is-primary", "data-df-action": "confirm-optimize-workflow", onClick: runWorkflowOptimization }, t.workflowOptimizeConfirm)
+      )
+    )
+  );
+
+  const cancelConfirmDialog = cancelConfirm && React.createElement("div", {
+    className: "df-confirm-backdrop",
+    role: "presentation",
+    onPointerDown: (event) => {
+      if (event.target === event.currentTarget) setCancelConfirm(null);
+    }
+  },
+    React.createElement("div", { className: "df-confirm", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "df-cancel-confirm-title" },
+      React.createElement("h3", { id: "df-cancel-confirm-title" },
+        cancelConfirm.mode === "logic" ? t.cancelConfirmLogic
+          : cancelConfirm.mode === "workflow" ? t.cancelConfirmWorkflow
+          : t.cancelConfirmDoc),
+      React.createElement("div", { className: "df-confirm__actions" },
+        React.createElement("button", { className: "df-btn", "data-df-action": "wait-cancel", onClick: () => setCancelConfirm(null) }, t.waitMore),
+        React.createElement("button", {
+          className: "df-btn is-primary",
+          "data-df-action": "confirm-cancel-agent",
+          onClick: () => {
+            const mode = cancelConfirm.mode;
+            setCancelConfirm(null);
+            if (mode === "document") cancelOptimizeFor(assistantTarget);
+            else cancelAssistant();
+          }
+        }, t.confirmCancel)
       )
     )
   );
@@ -1850,6 +1909,7 @@ function Studio({ connection, sessionId, language }) {
     leftSplitter,
     React.createElement("div", { className: "df-canvas-shell", ref: canvasShellRef },
       workflowConfirmDialog,
+      cancelConfirmDialog,
       topologyConfirmDialog,
       gatePickerDialog,
       branchPickerDialog,
