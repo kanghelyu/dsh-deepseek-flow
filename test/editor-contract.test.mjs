@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const client = await readFile(new URL("../src/client/entry.js", import.meta.url), "utf8");
+const clientSources = await Promise.all([
+  "../src/client/entry.js",
+  "../src/client/graph-canvas.js",
+  "../src/client/graph-model.js",
+  "../src/client/i18n.js",
+  "../src/client/styles.js"
+].map((path) => readFile(new URL(path, import.meta.url), "utf8")));
+const client = clientSources.join("\n");
 const host = await readFile(new URL("../lib/index.js", import.meta.url), "utf8");
 const descriptors = await readFile(new URL("../lib/typert.descriptors.js", import.meta.url), "utf8");
 const build = await readFile(new URL("../scripts/build.mjs", import.meta.url), "utf8");
@@ -46,6 +53,11 @@ test("condition boxes choose a gate first and enforce labeled outgoing branches"
   assert.match(client, /validateGateBranch/);
   assert.match(client, /if \(gateType === "ifElse"\)/);
   assert.match(client, /commitConnection\(conn, gateType\)/);
+  assert.match(client, /selectedConditionInputs/);
+  assert.match(client, /selectedGateArityValid/);
+  assert.match(client, /gateRule\(selectedNode\.data\.gateType\)/);
+  assert.match(client, /inputPredicates/);
+  assert.match(client, /t\.logicInputs/);
   assert.match(client, /onConnectionRejected/);
   assert.match(client, /gateChangeBlocked/);
   assert.match(client, /autoLogicLabel/);
@@ -91,11 +103,13 @@ test("DeepSeekFlow has no run surface or host execution endpoint", () => {
   assert.doesNotMatch(client, /className:\s*"df-actionbar"/);
 });
 
-test("current Session can read the complete flow without running it", () => {
+test("current Session can read the complete flow and evaluate gates without running Agent steps", () => {
   assert.match(host, /name:\s*"flow_read"/);
+  assert.match(host, /name:\s*"flow_evaluate"/);
   assert.match(host, /workflowContent/);
   assert.match(host, /orderedNodeIds\(flow\)/);
-  assert.match(host, /Execute in the current Session/);
+  assert.match(host, /Use logicContract or flow_evaluate/);
+  assert.match(host, /evaluateFlowLogic\(stored, args\.values\)/);
 });
 
 test("bottom assistant manually delegates validation and optimization to a one-shot Agent", () => {
@@ -104,7 +118,7 @@ test("bottom assistant manually delegates validation and optimization to a one-s
   assert.match(client, /runLogicValidation/);
   assert.match(client, /runDocumentOptimization/);
   assert.match(client, /runWorkflowOptimization/);
-  assert.match(client, /onClick: runLogicValidation/);
+  assert.match(client, /topologyDirty \? " is-disabled" : ""/);
   assert.match(client, /onClick: runDocumentOptimization/);
   assert.match(client, /"data-df-action": "logic-validation"/);
   assert.match(client, /"data-df-action": "optimize-document"/);
@@ -122,7 +136,10 @@ test("bottom assistant manually delegates validation and optimization to a one-s
   assert.doesNotMatch(client, /copyForSession|copySession/);
   assert.equal((client.match(/remoteCall\(connection, "dflow\/assist"/g) ?? []).length, 3);
   assert.match(client, /mode: "optimize-workflow"/);
-  assert.match(client, /remoteCall\(connection, "dflow\/put", \{ flow: optimizedFlow, sessionId \}\)/);
+  assert.match(client, /const optimizedFlow =/);
+  assert.match(client, /mergeDocumentEdits\(persistedFlowRef\.current, optimizedFlow/);
+  assert.match(client, /const persistedRevision = persistedRevisionRef\.current\.get\(documentOnly\.id\)/);
+  assert.match(client, /remoteCall\(connection, "dflow\/put", \{ flow: payload, sessionId \}\)/);
   assert.match(client, /remoteCall\(connection, "dflow\/assistCancel"/);
   assert.match(client, /flex:none/);
   assert.match(client, /beginAssistantResize/);
@@ -212,6 +229,31 @@ test("client build carries a visible content revision for cache diagnosis", () =
   assert.match(build, /replaceAll\("__DEEPSEEK_FLOW_CLIENT_REV__"/);
   assert.match(build, /wrapped = wrapped\.replace\([^\n]*client-rev/);
   assert.match(build, /dependency-free offline wrapper/);
+});
+
+test("Studio serializes autosaves while carrying the latest persisted revision", () => {
+  assert.match(client, /persistedRevisionRef/);
+  assert.match(client, /\{ \.\.\.documentOnly, revision: persistedRevision \}/);
+  assert.match(client, /persistedRevisionRef\.current\.set\(saved\.id/);
+  assert.match(host, /nextFlowRevision/);
+  assert.match(host, /documentPolicy: "prefer-flow"/);
+  assert.match(host, /archiveObsoleteDocuments/);
+});
+
+test("topology edits require an explicit bottom-right main-Session review before persistence", () => {
+  assert.match(client, /topologyDirty/);
+  assert.match(client, /df-topology-apply/);
+  assert.match(client, /"data-df-action": "apply-topology"/);
+  assert.match(client, /"data-df-action": "confirm-apply-topology"/);
+  assert.match(client, /dflow\/topologyApply/);
+  assert.match(client, /mergeDocumentEdits/);
+  assert.match(client, /baseTopology: topologyProjection\(baseFlow\)/);
+  assert.match(client, /topologyApplyFailed/);
+  assert.match(client, /df-canvas-stage/);
+  assert.match(host, /runMainSessionTopologyReview/);
+  assert.match(host, /topologySignature\(latestBase\) !== topologySignature\(baseTopology\)/);
+  assert.match(host, /validateFlow\(rebuilt\)/);
+  assert.match(descriptors, /"topologyApply"/);
 });
 
 test("dependency repair prefers registry packages, falls back to DSH, and refuses live-web mutation", () => {

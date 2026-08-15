@@ -32,6 +32,8 @@ test("logic Agent prompt contains every Markdown document and graph edge", () =>
   assert.match(prompt, /INPUT_ONLY/);
   assert.match(prompt, /OUTPUT_ONLY/);
   assert.match(prompt, /\"source\":\"input\"/);
+  assert.match(prompt, /\"logicContract\":\{\"version\":1/);
+  assert.match(prompt, /不能只把 AND\/OR\/XOR/);
   assert.match(prompt, /不要运行工作流/);
 });
 

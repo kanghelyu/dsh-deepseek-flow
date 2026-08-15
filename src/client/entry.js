@@ -5,355 +5,45 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback } from "react";
 import {
   CONDITION_GATE_TYPES,
-  availableGateBranches,
   conditionGateType,
   gateBranchForEdge,
-  normalizeGateType,
-  validateGateBranch
+  normalizeGateType
 } from "../../lib/condition-gates.js";
+import { LOGIC_PREDICATES, gateRule } from "../../lib/logic-semantics.js";
+import {
+  mergeDocumentEdits,
+  topologyDiff,
+  topologyProjection,
+  topologySignature
+} from "../../lib/topology-model.js";
+import { GraphCanvas, GRAPH_MIN_ZOOM } from "./graph-canvas.js";
+import { browserLanguage, localeLanguage, text } from "./i18n.js";
+import {
+  branchDisplayLabel,
+  connectionProblem,
+  connectionProblemMessage,
+  flowToCanvasEdges,
+  flowToCanvasNodes,
+  graphSnapshot,
+  layoutNodes,
+  logicSnapshot,
+  reconnectFlowEdge,
+  serializeFlow
+} from "./graph-model.js";
+import { styles } from "./styles.js";
+
+
+function loadPositionOverrides(flowId) {
+  try {
+    return JSON.parse(localStorage.getItem(`deepseek-flow:positions:${flowId}`) ?? "null") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const inject = ["slots", "connection", "locale"];
 const CLIENT_REV = "__DEEPSEEK_FLOW_CLIENT_REV__";
 
-// ============ 语言 ============
-function localeLanguage(localeService) {
-  try {
-    const snapshot = localeService?.getLocale?.();
-    const active = String(snapshot?.active ?? "");
-    if (active) return active.toLowerCase().startsWith("zh") ? "zh" : "en";
-  } catch {
-    // fall through
-  }
-  return browserLanguage();
-}
-
-function browserLanguage() {
-  try {
-    return String(navigator.language ?? "en").toLowerCase().startsWith("zh") ? "zh" : "en";
-  } catch {
-    return "en";
-  }
-}
-
-function text(language) {
-  return language === "zh"
-    ? {
-        view: "DeepSeek Flow",
-        studio: "流程设计",
-        editorOnly: "仅编辑",
-        editorOnlyNote: "执行请回到当前 Session",
-        ready: "就绪",
-        saving: "保存中…",
-        saved: "已保存",
-        autoSaving: "正在同步 Markdown…",
-        autoSaved: "Markdown 已写入",
-        createFailed: "新建失败：",
-        newFlow: "新建",
-        shared: "共享",
-        importLabel: "导入 JSON",
-        exportLabel: "导出 JSON",
-        save: "保存",
-        undo: "撤销",
-        redo: "重做",
-        tidy: "一键整理",
-        flow: "工作流",
-        documents: "工作流文档",
-        workflowDoc: "总控流程",
-        stepDocs: "分步工作区",
-        openDocument: "选择一个 Markdown 文件进行编辑",
-        markdownContent: "Markdown 内容",
-        docRoot: "文档工作区",
-        workspace: "步骤工作区",
-        filePath: "文件",
-        documentFirst: "文档优先",
-        documentFirstNote: "先读 WORKFLOW.md，再按顺序执行每个 STEP.md",
-        collapseDocs: "收起工作流文档",
-        expandDocs: "展开工作流文档",
-        resizeDocs: "拖动调整文档栏宽度；双击收起或展开",
-        collapseEditor: "收起 Markdown 编辑器",
-        expandEditor: "展开 Markdown 编辑器",
-        resizeEditor: "拖动调整编辑器宽度；双击收起或展开",
-        resizeAssistant: "拖动调整助手高度；双击收起或展开",
-        fitAll: "显示全图",
-        zoomIn: "放大",
-        zoomOut: "缩小",
-        addNode: "新建流程框",
-        connectHint: "拖动右侧圆点新建箭头；条件框会自动约束逻辑分支",
-        nodeKind: {
-          input: "输入",
-          agent: "Agent",
-          mapAgent: "Map Agent",
-          condition: "条件",
-          merge: "合并",
-          output: "输出"
-        },
-        properties: "节点属性",
-        prompt: "提示词",
-        stage: "阶段",
-        predicate: "谓词",
-        gateTypeLabel: "逻辑门类型",
-        gateType: {
-          ifElse: "是 / 否（IF / ELSE）",
-          and: "与门（AND）",
-          or: "或门（OR）",
-          not: "非门（NOT）",
-          nand: "与非门（NAND）",
-          nor: "或非门（NOR）",
-          xor: "异或门（XOR）",
-          xnor: "同或门（XNOR）"
-        },
-        gateDescription: {
-          ifElse: "最多两条箭头：是、否各一条",
-          and: "可连接多个目标，箭头自动标注“与”",
-          or: "可连接多个目标，箭头自动标注“或”",
-          not: "只允许一条箭头，自动标注“非”",
-          nand: "可连接多个目标，箭头自动标注“与非”",
-          nor: "可连接多个目标，箭头自动标注“或非”",
-          xor: "可连接多个目标，箭头自动标注“异或”",
-          xnor: "可连接多个目标，箭头自动标注“同或”"
-        },
-        chooseGateTitle: "选择条件框的逻辑门",
-        chooseGateIntro: "门类型会决定箭头标签和允许连接的数量。创建后仍可在没有出线时修改。",
-        chooseBranchTitle: "选择判断分支",
-        chooseBranchIntro: "“是”和“否”各只能连接一个目标。",
-        connectionWarningTitle: "无法创建箭头",
-        branchLabel: {
-          true: "是",
-          false: "否",
-          and: "与",
-          or: "或",
-          not: "非",
-          nand: "与非",
-          nor: "或非",
-          xor: "异或",
-          xnor: "同或"
-        },
-        cancel: "取消",
-        dismiss: "知道了",
-        duplicateConnection: "这两个流程框之间已经存在箭头，不能重复连接。",
-        ifElseFull: "这个是/否条件已经有两条分支，不能再拉出第三条箭头。",
-        notFull: "非门只允许一条出线，不能再创建箭头。",
-        branchUsed: "这个分支已经连接过目标；“是”和“否”各只能使用一次。",
-        gateMismatch: "箭头逻辑与当前门类型不匹配。",
-        gateChangeBlocked: "该条件框已有出线。请先删除这些箭头，再修改逻辑门类型。",
-        invalidConnection: "这条箭头不符合当前条件门规则。",
-        model: "模型",
-        provider: "Provider",
-        outputSchema: "输出 Schema (JSON)",
-        none: "无",
-        noFlow: "还没有工作流：请让 Agent 创建，或导入 JSON",
-        importFailed: "导入失败：",
-        invalidJson: "JSON 无效：",
-        importOk: "已导入：",
-        deleteNode: "删除节点",
-        exportOk: "已导出",
-        docFile: "文档文件（相对 docRoot）",
-        docSyncNote: "提示词将同步写回：",
-        advancedHints: "Session 提示（高级）",
-        assistant: "AI 文档助手",
-        assistModelLabel: "AI 助手使用模型",
-        assistModelFollow: "跟随会话",
-        assistEffortLabel: "思考强度",
-        assistEffortFollow: "跟随会话",
-        assistEffortOff: "off",
-        assistEffortHigh: "high",
-        assistEffortMax: "max",
-        assistantSafe: "",
-        assistantTarget: "当前文档",
-        assistantInstruction: "AI 优化要求（可选）",
-        assistantInstructionHint: "例如：更强调截图质检、失败回退和交付文件",
-        aiOptimize: "AI 优化当前文档",
-        aiOptimizeWorkflow: "AI 优化整个工作流",
-        logicValidation: "逻辑校验",
-        agentLogicBusy: "Agent 校验中…",
-        agentOptimizeBusy: "Agent 优化中…",
-        agentWorkflowBusy: "Agent 整体优化中…",
-        cancelAgent: "取消 Agent",
-        assistantCancelled: "已请求取消 Agent 操作",
-        acceptSuggestion: "接受修改",
-        discardSuggestion: "拒绝修改",
-        acceptedSuggestion: "优化方案已接受并同步",
-        discardedSuggestion: "已拒绝方案，原始文档未改变",
-        staleSuggestion: "原文在方案生成后已变化，请拒绝并重新优化",
-        suggestionPreview: "完整 Markdown 修改方案",
-        proposalPending: "待加载",
-        proposalDecision: "接受或拒绝修改",
-        workflowOptimizeTitle: "确认优化整个工作流？",
-        workflowOptimizeWarning: "该操作会让 Agent 直接改写 WORKFLOW.md 和全部 STEP.md，并立即保存，不提供逐份接受或撤销。请确认已经备份重要内容。",
-        workflowOptimizeConfirm: "确认并直接优化",
-        workflowOptimizeCancel: "取消",
-        workflowOptimized: "整个工作流已由 Agent 优化并保存",
-        workflowChangedDuringOptimization: "优化期间文档已变化，为防止覆盖新内容，本次结果未写入",
-        noFindings: "未发现错误或警告",
-        issues: "项校验结果",
-        validationIdle: "点击“逻辑校验”扫描 WORKFLOW.md 与全部 STEP.md",
-        validationStale: "文档已变化，请再次点击“逻辑校验”复测",
-        validationComplete: "Agent 逻辑校验完成",
-        proposalIdle: "选择一个文档，然后手动点击“AI 优化当前文档”",
-        expandAssistant: "展开 AI 文档助手",
-        collapseAssistant: "收起 AI 文档助手",
-        assistantFailed: "操作失败：",
-        edgeSelected: "已选择箭头，按 Delete 删除"
-      }
-    : {
-        view: "DeepSeek Flow",
-        studio: "Flow editor",
-        editorOnly: "Edit only",
-        editorOnlyNote: "Run from the current Session",
-        ready: "Ready",
-        saving: "Saving…",
-        saved: "Saved",
-        autoSaving: "Syncing Markdown…",
-        autoSaved: "Markdown written",
-        createFailed: "Create failed: ",
-        newFlow: "New",
-        shared: "Shared",
-        importLabel: "Import JSON",
-        exportLabel: "Export JSON",
-        save: "Save",
-        undo: "Undo",
-        redo: "Redo",
-        tidy: "Auto layout",
-        flow: "Flow",
-        documents: "Workflow docs",
-        workflowDoc: "Master workflow",
-        stepDocs: "Step workspaces",
-        openDocument: "Select a Markdown file to edit",
-        markdownContent: "Markdown content",
-        docRoot: "Document workspace",
-        workspace: "Step workspace",
-        filePath: "File",
-        documentFirst: "Docs first",
-        documentFirstNote: "Read WORKFLOW.md first, then execute each STEP.md in order",
-        collapseDocs: "Collapse workflow documents",
-        expandDocs: "Expand workflow documents",
-        resizeDocs: "Drag to resize the document rail; double-click to collapse or expand",
-        collapseEditor: "Collapse Markdown editor",
-        expandEditor: "Expand Markdown editor",
-        resizeEditor: "Drag to resize the editor; double-click to collapse or expand",
-        resizeAssistant: "Drag to resize the assistant; double-click to collapse or expand",
-        fitAll: "Fit all",
-        zoomIn: "Zoom in",
-        zoomOut: "Zoom out",
-        addNode: "New flow box",
-        connectHint: "Drag from the right handle; condition gates enforce their own branch rules",
-        nodeKind: {
-          input: "Input",
-          agent: "Agent",
-          mapAgent: "Map Agent",
-          condition: "Condition",
-          merge: "Merge",
-          output: "Output"
-        },
-        properties: "Node properties",
-        prompt: "Prompt",
-        stage: "Stage",
-        predicate: "Predicate",
-        gateTypeLabel: "Logic gate",
-        gateType: {
-          ifElse: "Yes / No (IF / ELSE)",
-          and: "AND gate",
-          or: "OR gate",
-          not: "NOT gate",
-          nand: "NAND gate",
-          nor: "NOR gate",
-          xor: "XOR gate",
-          xnor: "XNOR gate"
-        },
-        gateDescription: {
-          ifElse: "Up to two arrows: one Yes and one No",
-          and: "Connect multiple targets; arrows are labeled AND automatically",
-          or: "Connect multiple targets; arrows are labeled OR automatically",
-          not: "Exactly one outgoing arrow, labeled NOT automatically",
-          nand: "Connect multiple targets; arrows are labeled NAND automatically",
-          nor: "Connect multiple targets; arrows are labeled NOR automatically",
-          xor: "Connect multiple targets; arrows are labeled XOR automatically",
-          xnor: "Connect multiple targets; arrows are labeled XNOR automatically"
-        },
-        chooseGateTitle: "Choose a logic gate",
-        chooseGateIntro: "The gate controls arrow labels and outgoing connection limits. You can change it later while it has no outgoing arrows.",
-        chooseBranchTitle: "Choose a decision branch",
-        chooseBranchIntro: "Yes and No can each connect to one target only.",
-        connectionWarningTitle: "Cannot create arrow",
-        branchLabel: {
-          true: "Yes",
-          false: "No",
-          and: "AND",
-          or: "OR",
-          not: "NOT",
-          nand: "NAND",
-          nor: "NOR",
-          xor: "XOR",
-          xnor: "XNOR"
-        },
-        cancel: "Cancel",
-        dismiss: "Got it",
-        duplicateConnection: "An arrow already connects these two boxes.",
-        ifElseFull: "This Yes/No condition already has both branches; a third arrow is not allowed.",
-        notFull: "A NOT gate allows only one outgoing arrow.",
-        branchUsed: "That branch is already connected; Yes and No can each be used once.",
-        gateMismatch: "The arrow logic does not match the selected gate.",
-        gateChangeBlocked: "This condition already has outgoing arrows. Delete them before changing the logic gate.",
-        invalidConnection: "This arrow violates the current condition-gate rules.",
-        model: "Model",
-        provider: "Provider",
-        outputSchema: "Output schema (JSON)",
-        none: "None",
-        noFlow: "No flow yet: ask the Agent to create one, or import JSON",
-        importFailed: "Import failed: ",
-        invalidJson: "Invalid JSON: ",
-        importOk: "Imported: ",
-        deleteNode: "Delete node",
-        exportOk: "Exported",
-        docFile: "Doc file (relative to docRoot)",
-        docSyncNote: "Prompt syncs back to: ",
-        advancedHints: "Session hints (advanced)",
-        assistant: "AI",
-        assistModelLabel: "Model used by the AI assistant",
-        assistModelFollow: "Follow session",
-        assistEffortLabel: "Reasoning effort",
-        assistEffortFollow: "Follow session",
-        assistEffortOff: "Off",
-        assistEffortHigh: "High",
-        assistEffortMax: "Max",
-        assistantSafe: "",
-        assistantTarget: "Current document",
-        assistantInstruction: "AI optimization request (optional)",
-        assistantInstructionHint: "For example: emphasize screenshot QA, fallback and deliverables",
-        aiOptimize: "AI optimize current doc",
-        aiOptimizeWorkflow: "AI optimize entire workflow",
-        logicValidation: "Logic validation",
-        agentLogicBusy: "Agent validating…",
-        agentOptimizeBusy: "Agent optimizing…",
-        agentWorkflowBusy: "Agent optimizing workflow…",
-        cancelAgent: "Cancel Agent",
-        assistantCancelled: "Agent cancellation requested",
-        acceptSuggestion: "Accept changes",
-        discardSuggestion: "Reject changes",
-        acceptedSuggestion: "Optimization accepted and syncing",
-        discardedSuggestion: "Proposal rejected; original document unchanged",
-        staleSuggestion: "The source changed after this proposal; undo and optimize again",
-        suggestionPreview: "Full Markdown proposal",
-        proposalPending: "Waiting to load",
-        proposalDecision: "Accept or reject changes",
-        workflowOptimizeTitle: "Optimize the entire workflow?",
-        workflowOptimizeWarning: "The Agent will directly rewrite WORKFLOW.md and every STEP.md, then save immediately. There is no per-document acceptance or undo. Back up important content first.",
-        workflowOptimizeConfirm: "Confirm and optimize",
-        workflowOptimizeCancel: "Cancel",
-        workflowOptimized: "The entire workflow was optimized and saved",
-        workflowChangedDuringOptimization: "Documents changed during optimization, so the result was not written",
-        noFindings: "No errors or warnings found",
-        issues: "validation findings",
-        validationIdle: "Click Logic validation to scan WORKFLOW.md and every STEP.md",
-        validationStale: "Documents changed; click Logic validation again to retest",
-        validationComplete: "Agent logic validation completed",
-        proposalIdle: "Select one document, then manually click AI optimize current doc",
-        expandAssistant: "Expand AI document assistant",
-        collapseAssistant: "Collapse AI document assistant",
-        assistantFailed: "Operation failed: ",
-        edgeSelected: "Arrow selected; press Delete to remove"
-      };
-}
 
 // ============ API ============
 async function remoteCall(connection, endpoint, args = {}) {
@@ -380,726 +70,8 @@ function download(content, fileName, mediaType) {
   URL.revokeObjectURL(url);
 }
 
-// ============ 样式（主题跟随 webui：全部 dsw alias token）============
-const styles = String.raw`
-.deepseek-flow-root{--df-border:var(--dsw-alias-border-l1);--df-border-strong:var(--dsw-alias-border-l2);--df-bg:var(--dsw-alias-bg-base);--df-layer:var(--dsw-alias-bg-layer-1);--df-layer-2:var(--dsw-alias-bg-layer-2);--df-brand:var(--dsw-alias-brand-primary);--df-on-brand:var(--dsw-alias-label-primary-inverse,var(--dsw-alias-label-reverse,var(--df-bg)));--df-ink:var(--dsw-alias-label-primary);--df-ink-2:var(--dsw-alias-label-secondary);--df-ok:var(--dsw-alias-state-success-primary);--df-warn:var(--dsw-alias-state-warn-primary);--df-err:var(--dsw-alias-state-error-primary);position:relative;inset:auto;width:100%;height:100%;max-height:100vh;min-height:0;display:grid;grid-template-rows:48px minmax(0,1fr);background:var(--df-bg);color:var(--df-ink);font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
-.deepseek-flow-root *{box-sizing:border-box}
-.deepseek-flow-root button,.deepseek-flow-root input,.deepseek-flow-root select,.deepseek-flow-root textarea{font:inherit}
-.deepseek-flow-root button{cursor:pointer}
-.df-tabs{display:flex;align-items:center;gap:10px;padding:0 20px;background:var(--df-layer);border-bottom:1px solid var(--df-border)}
-.df-titlebar__title{font-size:14px;font-weight:720;color:var(--df-ink)}
-.df-titlebar__badge{padding:3px 7px;border-radius:999px;background:color-mix(in srgb,var(--df-brand) 10%,transparent);color:var(--df-brand);font-size:10px;font-weight:700}
-.df-titlebar__note{color:var(--df-ink-2);font-size:11px}
-.df-titlebar__rev{margin-left:auto;color:var(--df-ink-2);font:9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.72}
-.df-main{min-height:0;overflow:hidden}
-.df-toolbar{flex:none;height:52px;min-height:52px;display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--df-layer);border-bottom:1px solid var(--df-border);flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
-.df-toolbar>*{flex:none}
-.df-toolbar>label{display:flex;align-items:center;gap:7px;color:var(--df-ink-2);font-size:12px}
-.df-toolbar select,.df-toolbar input,.df-toolbar textarea{border:1px solid var(--df-border-strong);border-radius:7px;background:var(--df-layer-2);color:var(--df-ink);padding:6px 8px;outline:0}
-.df-toolbar input:focus,.df-toolbar select:focus,.df-toolbar textarea:focus{border-color:var(--df-brand)}
-.df-btn{border:1px solid var(--df-border-strong);border-radius:8px;background:var(--df-layer-2);color:var(--df-ink);padding:6px 11px;transition:border-color .15s ease,transform .15s ease,background .15s ease}
-.df-btn:hover{border-color:var(--df-brand);transform:translateY(-1px)}
-.df-btn.is-primary{border-color:var(--df-brand);background:var(--df-brand);color:var(--df-on-brand);font-weight:650}
-.df-btn.is-ghost{background:transparent}
-.df-btn:disabled{opacity:.5;cursor:default}
-.df-status{color:var(--df-ink-2);font-size:12px;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:38%}
-.df-studio{height:100%;display:grid;grid-template-rows:minmax(0,1fr);min-height:0;min-width:0;background:var(--df-bg);overflow:hidden}
-.df-canvas-shell{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;background:var(--df-bg);overflow:hidden}
-.df-canvas{flex:1;min-height:0;position:relative;overflow:hidden;touch-action:none;user-select:none;background-color:var(--df-bg);background-image:radial-gradient(circle,var(--df-border-strong) 1.1px,transparent 1.2px),radial-gradient(circle at 50% 0%,color-mix(in srgb,var(--df-brand) 6%,transparent),transparent 42%);background-size:24px 24px,100% 100%;cursor:grab}
-.df-canvas.is-panning{cursor:grabbing}
-.df-graph__stage{position:absolute;left:0;top:0;width:1px;height:1px;transform-origin:0 0;will-change:transform}
-.df-graph__edges{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
-.df-graph__edge{fill:none!important;stroke:var(--df-brand);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 2px color-mix(in srgb,var(--df-brand) 36%,transparent));pointer-events:none}
-.df-graph__edge.is-selected{stroke-width:3.6;filter:drop-shadow(0 0 4px color-mix(in srgb,var(--df-brand) 58%,transparent))}
-.df-graph__edge-hit{fill:none!important;stroke:transparent;stroke-width:18;vector-effect:non-scaling-stroke;pointer-events:stroke;cursor:pointer}
-.df-graph__connection{fill:none!important;stroke:var(--df-brand);stroke-width:2;stroke-dasharray:7 5;vector-effect:non-scaling-stroke;pointer-events:none}
-.df-graph__label-bg{fill:var(--df-layer);stroke:var(--df-border);stroke-width:1;vector-effect:non-scaling-stroke}
-.df-graph__label{fill:var(--df-ink);font-size:10px;font-weight:750;text-anchor:middle;dominant-baseline:middle;pointer-events:none}
-.df-graph__node{position:absolute;width:208px;height:116px;pointer-events:auto;cursor:grab}
-.df-graph__node.is-dragging{cursor:grabbing}
-.df-graph__handle{position:absolute;z-index:4;top:50%;width:13px;height:13px;padding:0;border:2px solid var(--df-bg);border-radius:50%;background:var(--df-brand);transform:translateY(-50%);cursor:crosshair;box-shadow:0 0 0 1px color-mix(in srgb,var(--df-brand) 65%,var(--df-border-strong));transition:transform .14s ease,box-shadow .14s ease}
-.df-graph__handle:hover,.df-graph__handle:focus-visible{transform:translateY(-50%) scale(1.18);box-shadow:0 0 0 5px color-mix(in srgb,var(--df-brand) 18%,transparent);outline:0}
-.df-graph__handle--target{left:-6px}
-.df-graph__handle--source{right:-6px}
-.df-graph__controls{position:absolute;z-index:8;left:12px;bottom:12px;display:grid;border:1px solid var(--df-border-strong);border-radius:9px;overflow:hidden;background:var(--df-layer);box-shadow:0 8px 20px color-mix(in srgb,var(--df-ink) 9%,transparent)}
-.df-graph__controls button{width:32px;height:30px;border:0;border-bottom:1px solid var(--df-border);background:var(--df-layer-2);color:var(--df-ink);font-weight:750}
-.df-graph__controls button:last-child{border-bottom:0}
-.df-graph__controls button:hover{background:color-mix(in srgb,var(--df-brand) 10%,var(--df-layer-2));color:var(--df-brand)}
-.df-node{width:100%;height:100%;padding:12px 14px;border:1px solid var(--df-border-strong);border-radius:12px;background:color-mix(in srgb,var(--df-layer) 96%,var(--df-brand) 4%);color:var(--df-ink);box-shadow:0 8px 24px color-mix(in srgb,var(--df-ink) 9%,transparent);transition:border-color .16s ease,box-shadow .16s ease,transform .16s ease;overflow:hidden}
-.df-node:hover{border-color:color-mix(in srgb,var(--df-brand) 55%,var(--df-border-strong));box-shadow:0 12px 30px color-mix(in srgb,var(--df-ink) 12%,transparent)}
-.df-node.is-selected{border-color:var(--df-brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--df-brand) 18%,transparent),0 12px 30px color-mix(in srgb,var(--df-ink) 12%,transparent)}
-.df-node__kind{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--df-ink-2);margin-bottom:2px}
-.df-node__label{font-weight:650;font-size:13px;word-break:break-word}
-.df-node__prompt{margin-top:5px;font-size:11px;color:var(--df-ink-2);white-space:pre-wrap;max-height:34px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.df-node__file{margin-top:8px;padding-top:7px;border-top:1px solid var(--df-border);font:10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--df-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.df-node--input .df-node__kind{color:var(--df-ok)}
-.df-node--agent .df-node__kind{color:var(--df-brand)}
-.df-node--mapAgent .df-node__kind{color:var(--df-warn)}
-.df-node--condition .df-node__kind{color:var(--df-warn)}
-.df-node--merge .df-node__kind{color:var(--df-ink-2)}
-.df-node--output .df-node__kind{color:var(--df-err)}
-.df-docrail{min-width:0;width:auto;display:flex;flex-direction:column;background:var(--df-layer);min-height:0;overflow:hidden}
-.df-docrail.is-collapsed{visibility:hidden;pointer-events:none}
-.df-docrail__head{position:relative;min-height:58px;padding:12px 14px 10px;border-bottom:1px solid var(--df-border)}
-.df-docrail__title{font-size:13px;font-weight:700;color:var(--df-ink)}
-.df-docrail__note{margin-top:3px;font-size:10px;line-height:1.45;color:var(--df-ink-2)}
-.df-docrail__list{flex:1 1 0;height:0;min-height:0;overflow:auto;overscroll-behavior:contain;padding:9px;display:flex;flex-direction:column;gap:6px;scrollbar-width:thin}
-.df-docgroup{padding:5px 7px 2px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--df-ink-2)}
-.df-docitem{width:100%;display:grid;grid-template-columns:24px minmax(0,1fr);gap:9px;align-items:center;text-align:left;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--df-ink);padding:8px}
-.df-docitem:hover{background:var(--df-layer-2);border-color:var(--df-border)}
-.df-docitem.is-active{background:color-mix(in srgb,var(--df-brand) 10%,var(--df-layer));border-color:color-mix(in srgb,var(--df-brand) 45%,var(--df-border));color:var(--df-brand)}
-.df-docitem__icon{width:24px;height:28px;border:1px solid currentColor;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;opacity:.76}
-.df-docitem__label{display:block;font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.df-docitem__path{display:block;font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--df-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.df-inspector{min-width:0;width:auto;height:100%;max-height:100%;display:flex;flex-direction:column;background:var(--df-layer);overflow:hidden;min-height:0}
- .df-inspector__scroll{flex:1 1 0;height:0;min-height:0;overflow:auto;overscroll-behavior:contain;padding:15px;display:flex;flex-direction:column;gap:11px;scrollbar-width:thin}
- .df-inspector__scroll>*{flex-shrink:0}
- .df-inspector>*{flex-shrink:0}
-.df-inspector.is-collapsed{visibility:hidden;pointer-events:none;padding:0}
-.df-inspector h3{margin:0;font-size:14px;color:var(--df-ink)}
-.df-inspector label{display:grid;gap:4px;color:var(--df-ink-2);font-size:12px}
-.df-inspector input,.df-inspector select,.df-inspector textarea{width:100%;border:1px solid var(--df-border-strong);border-radius:7px;background:var(--df-layer-2);color:var(--df-ink);padding:6px 8px;outline:0}
-.df-inspector textarea{min-height:92px;resize:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55}
-.df-inspector textarea.df-markdown-editor{min-height:300px;max-height:60vh;resize:none;background:var(--df-bg);border-radius:10px;overflow-y:auto;scrollbar-width:thin}
-.df-advanced{border:1px solid var(--df-border);border-radius:9px;background:var(--df-layer-2);padding:0 9px}
-.df-advanced summary{cursor:pointer;padding:8px 0;color:var(--df-ink-2);font-size:11px;font-weight:650}
-.df-advanced__content{display:grid;gap:9px;padding:0 0 10px}
-.df-pathbox{display:flex;flex-direction:column;gap:2px;padding:9px 10px;border:1px solid var(--df-border);border-radius:9px;background:var(--df-layer-2)}
-.df-pathbox__label{font-size:10px;color:var(--df-ink-2)}
-.df-pathbox__value{font:10px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--df-ink);word-break:break-all}
-.df-inspector .df-empty{color:var(--df-ink-2);font-size:12px}
-.df-addbar{flex:none;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--df-border);background:var(--df-layer)}
-.df-addbar button{font-size:11px;padding:4px 9px}
-.df-connect-hint{margin-left:auto;color:var(--df-ink-2);font-size:10px;white-space:nowrap}
-.df-iconbtn{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:16px}
-.df-splitter{position:relative;z-index:12;min-width:9px;width:9px;cursor:col-resize;touch-action:none;background:var(--df-layer);outline:0}
-.df-splitter::before{content:"";position:absolute;inset:0 3px;background:var(--df-border)}
-.df-splitter::after{content:"";position:absolute;top:50%;left:50%;width:3px;height:42px;transform:translate(-50%,-50%);border-radius:999px;background:var(--df-border-strong);box-shadow:0 -7px 0 var(--df-border-strong),0 7px 0 var(--df-border-strong)}
-.df-splitter:hover::before,.df-splitter:focus-visible::before,.df-splitter.is-dragging::before{inset:0 2px;background:var(--df-brand)}
-.df-splitter.is-collapsed{background:color-mix(in srgb,var(--df-brand) 5%,var(--df-layer))}
-.df-splitter.is-collapsed::after{background:var(--df-brand);box-shadow:0 -7px 0 var(--df-brand),0 7px 0 var(--df-brand)}
-.df-assistant-splitter{position:relative;z-index:10;flex:none;height:8px;cursor:row-resize;touch-action:none;background:var(--df-layer)}
-.df-assistant-splitter::before{content:"";position:absolute;inset:3px 0;background:var(--df-border)}
-.df-assistant-splitter::after{content:"";position:absolute;left:50%;top:50%;width:44px;height:3px;transform:translate(-50%,-50%);border-radius:999px;background:var(--df-border-strong)}
-.df-assistant-splitter:hover::before,.df-assistant-splitter:focus-visible::before,.df-assistant-splitter.is-dragging::before{inset:2px 0;background:var(--df-brand)}
-.df-assistant{flex:none;background:var(--df-layer);min-height:44px;display:flex;flex-direction:column;overflow:hidden}
-.df-assistant.is-open{max-height:min(440px,54%)}
-.df-assistant__head{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:7px 14px}
-.df-assistant__spark{width:27px;height:27px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--df-brand) 12%,var(--df-layer));color:var(--df-brand);font-weight:800}
-.df-assistant__title{font-size:11px;font-weight:750;color:var(--df-ink);white-space:nowrap}
-.df-assistant__safe{font-size:9px;color:var(--df-ink-2);white-space:nowrap}
-.df-assistant__target{max-width:190px;padding:3px 8px;border:1px solid var(--df-border);border-radius:999px;color:var(--df-ink-2);font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- .df-assist-menu-wrap{position:relative;display:flex;align-items:center;flex:none}
- .deepseek-flow-root .df-assist-menu-btn{display:inline-flex;align-items:center;gap:4px;max-width:170px;border:1px solid var(--df-border-strong);border-radius:999px;background:var(--df-layer-2);color:var(--df-ink);padding:2px 8px;font-size:9px;line-height:1.35;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- .deepseek-flow-root .df-assist-menu-btn:hover{border-color:var(--df-brand)}
- .deepseek-flow-root .df-assist-menu-caret{font-size:8px;color:var(--df-ink-2);flex:none}
- .df-assist-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:40;min-width:230px;max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:6px;border:1px solid var(--df-border-strong);border-radius:14px;background:var(--df-layer);box-shadow:0 14px 36px color-mix(in srgb,var(--df-ink) 16%,transparent)}
- .deepseek-flow-root .df-assist-menu-item{display:flex;align-items:center;gap:6px;text-align:left;border:0;border-radius:10px;background:transparent;color:var(--df-ink);padding:8px 11px;font-size:11px;cursor:pointer}
- .deepseek-flow-root .df-assist-menu-item:hover{background:var(--df-layer-2)}
- .deepseek-flow-root .df-assist-menu-back{display:flex;align-items:center;border:0;border-radius:10px;background:transparent;color:var(--df-ink-2);padding:7px 11px;font-size:11px;cursor:pointer}
- .deepseek-flow-root .df-assist-menu-back:hover{background:var(--df-layer-2)}
-.df-assistant__actions{margin-left:auto;display:flex;align-items:center;gap:6px;flex:none}
-.df-assistant__head .df-btn{font-size:10px;padding:4px 8px}
-.df-assistant__toggle{width:28px;height:28px;padding:0;font-size:14px}
-.df-assistant__body{min-height:0;flex:1;display:grid;grid-template-columns:minmax(230px,.72fr) minmax(360px,1.28fr);gap:10px;padding:0 14px 12px;overflow:hidden}
-.df-assistant__control{display:flex;min-width:0;min-height:0;flex-direction:column;gap:7px;padding:9px;border:1px solid var(--df-border);border-radius:12px;background:var(--df-layer-2);overflow:hidden}
-.df-assistant__control label{flex:none;font-size:10px;color:var(--df-ink-2)}
-.df-assistant__control input,.df-assistant__preview textarea{width:100%;border:1px solid var(--df-border-strong);border-radius:8px;background:var(--df-layer-2);color:var(--df-ink);padding:7px 9px;outline:0}
-.df-assistant__control input:focus,.df-assistant__preview textarea:focus{border-color:var(--df-brand)}
-.df-assistant__summary{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--df-ink-2);min-height:24px}
-.df-count{appearance:none;padding:2px 7px;border-radius:999px;background:var(--df-layer-2);border:1px solid var(--df-border);font-size:9px;line-height:1.4;cursor:pointer}
-.df-count.is-error{color:var(--df-err)}
-.df-count.is-warning{color:var(--df-warn)}
-.df-count:hover,.df-count:focus-visible{border-color:currentColor;outline:0}
-.df-count.is-active{background:color-mix(in srgb,currentColor 14%,var(--df-layer-2));border-color:currentColor;box-shadow:inset 0 0 0 1px currentColor}
-.df-findings{flex:1 1 0;height:0;min-height:0;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:5px;padding-right:3px;scrollbar-width:thin}
-.df-finding{display:grid;grid-template-columns:7px minmax(0,1fr);gap:7px;width:100%;text-align:left;border:0;border-radius:7px;background:var(--df-layer-2);color:var(--df-ink);padding:6px 8px}
-.df-finding:hover{background:color-mix(in srgb,var(--df-brand) 7%,var(--df-layer-2))}
-.df-finding__dot{width:7px;height:7px;border-radius:50%;margin-top:5px;background:var(--df-ink-2)}
-.df-finding.is-error .df-finding__dot{background:var(--df-err)}
-.df-finding.is-warning .df-finding__dot{background:var(--df-warn)}
-.df-finding__doc{display:block;color:var(--df-brand);font:8px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
-.df-finding__message{display:block;font-size:10px;line-height:1.4}
-.df-finding__suggestion{display:block;color:var(--df-ink-2);font-size:9px;line-height:1.35;margin-top:2px}
-.df-assistant__preview{min-width:0;min-height:0;display:flex;flex-direction:column;border:1px solid var(--df-border);border-radius:12px;background:var(--df-bg);overflow:hidden}
-.df-assistant__preview-head{position:sticky;z-index:2;top:0;flex:none;min-height:40px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 9px;border-bottom:1px solid var(--df-border);background:var(--df-layer-2);font-size:10px;color:var(--df-ink-2)}
-.df-assistant__preview-head>span:last-child{display:inline-flex;align-items:center;gap:6px}
-.df-assistant__preview-title{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.df-assistant__preview textarea{flex:1;min-height:0;resize:none;overflow:auto;overscroll-behavior:contain;border:0;border-radius:0 0 12px 12px;padding:10px 12px;font:10px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--df-bg);scrollbar-width:thin}
-.df-assistant__pending{flex:1;min-height:0;display:grid;place-items:center;padding:18px;color:var(--df-ink-2);font-size:11px;text-align:center;overflow:auto}
-.df-confirm-backdrop{position:absolute;z-index:40;inset:0;display:grid;place-items:center;padding:20px;background:color-mix(in srgb,var(--df-bg) 72%,transparent);backdrop-filter:blur(4px)}
-.df-confirm{width:min(540px,100%);max-height:calc(100vh - 40px);overflow:auto;padding:18px;border:1px solid var(--df-border-strong);border-radius:14px;background:var(--df-layer);box-shadow:0 20px 60px color-mix(in srgb,var(--df-ink) 18%,transparent)}
-.df-confirm h3{margin:0 0 8px;font-size:15px;color:var(--df-ink)}
-.df-confirm p{margin:0;color:var(--df-ink-2);font-size:12px;line-height:1.65}
-.df-confirm__actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
-.df-gate-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:14px}
-.deepseek-flow-root .df-gate-choice{display:flex;min-height:82px;flex-direction:column;align-items:flex-start;gap:5px;text-align:left;border:1px solid var(--df-border-strong);border-radius:11px;background:var(--df-layer-2);color:var(--df-ink);padding:11px;cursor:pointer}
-.deepseek-flow-root .df-gate-choice:hover,.deepseek-flow-root .df-gate-choice:focus-visible{border-color:var(--df-brand);background:color-mix(in srgb,var(--df-brand) 7%,var(--df-layer-2));outline:0}
-.df-gate-choice strong{font-size:12px;color:var(--df-brand)}
-.df-gate-choice span{font-size:10px;line-height:1.45;color:var(--df-ink-2)}
-.df-branch-options{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
-.deepseek-flow-root .df-branch-option{min-height:54px;border:1px solid var(--df-border-strong);border-radius:11px;background:var(--df-layer-2);color:var(--df-ink);font-size:14px;font-weight:750;cursor:pointer}
-.deepseek-flow-root .df-branch-option:hover:not(:disabled),.deepseek-flow-root .df-branch-option:focus-visible:not(:disabled){border-color:var(--df-brand);color:var(--df-brand);outline:0}
-.deepseek-flow-root .df-branch-option:disabled{opacity:.38;cursor:not-allowed;text-decoration:line-through}
-.df-import-hidden{display:none}
-[data-conversation-scroll][data-deepseek-flow-immersive="true"]{--dsh-composer-height:0px!important;overflow:hidden!important}
-[data-conversation-scroll][data-deepseek-flow-immersive="true"]>[data-composer-seat]{display:none!important}
-[data-conversation-scroll][data-deepseek-flow-immersive="true"]>:not([data-composer-seat]){flex:1 1 0;min-height:0;height:100%}
-[data-conversation-scroll][data-deepseek-flow-immersive="true"] .deepseek-flow-root{height:100%;min-height:0}
-@media(max-width:1180px){.df-status{display:none}.df-assistant__safe{display:none}.df-assistant__target{max-width:120px}.df-titlebar__note{display:none}}
-@media(max-width:760px){.df-toolbar{padding:7px}.df-assistant__head{padding:7px;overflow-x:auto}.df-assistant__target{display:none}.df-assistant__body{grid-template-columns:1fr;overflow:auto;overscroll-behavior:contain}.df-assistant__control{min-height:150px}.df-findings{height:auto;min-height:80px}.df-assistant__preview{display:flex;min-height:210px}.df-assistant__head .df-btn{padding:4px 6px}.df-assistant__title{display:none}.df-tabs{padding:0 10px}.df-titlebar__badge{display:none}}
-`;
 
-// ============ 自定义节点 ============
-function FlowNode({ data, selected, language }) {
-  const kind = data.kind ?? "agent";
-  const copy = text(language ?? data.language ?? browserLanguage());
-  const kindLabel = kind === "condition"
-    ? `${copy.nodeKind[kind]} · ${copy.gateType[normalizeGateType(data.gateType)]}`
-    : copy.nodeKind[kind] ?? kind;
-  const children = [
-    React.createElement("div", { className: "df-node__kind" }, kindLabel),
-    React.createElement("div", { className: "df-node__label" }, String(data.label ?? kind)),
-    (data.prompt || data.instructions) ? React.createElement("div", { className: "df-node__prompt" }, String(data.prompt ?? data.instructions)) : null,
-    data.docPath ? React.createElement("div", { className: "df-node__file" }, String(data.docPath)) : null
-  ];
-  return React.createElement("div", { className: `df-node df-node--${kind}${selected ? " is-selected" : ""}` }, children);
-}
-
-const GRAPH_NODE_WIDTH = 208;
-const GRAPH_NODE_HEIGHT = 116;
-const GRAPH_MIN_ZOOM = 0.5;
-const GRAPH_MAX_ZOOM = 2.5;
-
-function clamp(value, minimum, maximum) {
-  return Math.max(minimum, Math.min(maximum, value));
-}
-
-function graphEdgeGeometry(edge, byId) {
-  const source = byId.get(edge.source);
-  const target = byId.get(edge.target);
-  if (!source || !target) return null;
-  const start = { x: source.position.x + GRAPH_NODE_WIDTH, y: source.position.y + GRAPH_NODE_HEIGHT / 2 };
-  const end = { x: target.position.x, y: target.position.y + GRAPH_NODE_HEIGHT / 2 };
-  const forward = Math.max(54, Math.abs(end.x - start.x) * 0.46);
-  const bend = end.x >= start.x ? forward : Math.max(90, forward * 0.7);
-  return {
-    start,
-    end,
-    label: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 },
-    path: `M ${start.x} ${start.y} C ${start.x + bend} ${start.y}, ${end.x - bend} ${end.y}, ${end.x} ${end.y}`
-  };
-}
-
-function GraphCanvas({
-  nodes,
-  edges,
-  language,
-  selectedNode,
-  selectedEdge,
-  onInit,
-  onNodeDragStart,
-  onNodeMove,
-  onNodeSelect,
-  onEdgeSelect,
-  onPaneClick,
-  onConnect,
-  onConnectionRejected,
-  isValidConnection,
-  fitLabel,
-  zoomInLabel,
-  zoomOutLabel
-}) {
-  const rootRef = React.useRef(null);
-  const cleanupRef = React.useRef(null);
-  const viewportRef = React.useRef({ x: 32, y: 32, zoom: 0.8 });
-  const viewportAnimationRef = React.useRef(null);
-  const markerIdRef = React.useRef(`df-arrow-${Math.random().toString(36).slice(2, 10)}`);
-  const [viewport, setViewport] = useState({ x: 32, y: 32, zoom: 0.8 });
-  const [panning, setPanning] = useState(false);
-  const [draggingNode, setDraggingNode] = useState(null);
-  const [connectionDraft, setConnectionDraft] = useState(null);
-  const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
-
-  const updateViewport = useCallback((value) => {
-    setViewport((current) => {
-      const next = typeof value === "function" ? value(current) : value;
-      viewportRef.current = next;
-      return next;
-    });
-  }, []);
-
-  const cancelViewportAnimation = useCallback(() => {
-    const active = viewportAnimationRef.current;
-    if (!active) return;
-    cancelAnimationFrame(active.frame);
-    viewportAnimationRef.current = null;
-  }, []);
-
-  const animateViewport = useCallback((target, duration = 0) => {
-    cancelViewportAnimation();
-    const milliseconds = Math.max(0, Number(duration) || 0);
-    if (milliseconds === 0) {
-      updateViewport(target);
-      return;
-    }
-    const start = viewportRef.current;
-    const startedAt = performance.now();
-    const active = { frame: 0 };
-    viewportAnimationRef.current = active;
-    const tick = (now) => {
-      if (viewportAnimationRef.current !== active) return;
-      const progress = clamp((now - startedAt) / milliseconds, 0, 1);
-      const eased = 1 - Math.pow(1 - progress, 4);
-      updateViewport({
-        x: start.x + (target.x - start.x) * eased,
-        y: start.y + (target.y - start.y) * eased,
-        zoom: start.zoom + (target.zoom - start.zoom) * eased
-      });
-      if (progress < 1) active.frame = requestAnimationFrame(tick);
-      else viewportAnimationRef.current = null;
-    };
-    active.frame = requestAnimationFrame(tick);
-  }, [cancelViewportAnimation, updateViewport]);
-
-  const stopGesture = useCallback(() => {
-    cancelViewportAnimation();
-    cleanupRef.current?.();
-    cleanupRef.current = null;
-    setPanning(false);
-    setDraggingNode(null);
-  }, [cancelViewportAnimation]);
-
-  useEffect(() => stopGesture, [stopGesture]);
-
-  const fitView = useCallback((options = {}) => {
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect || nodes.length === 0) return;
-    const requestedIds = new Set((options.nodes ?? []).map((node) => typeof node === "string" ? node : node?.id).filter(Boolean));
-    const visibleNodes = requestedIds.size > 0 ? nodes.filter((node) => requestedIds.has(node.id)) : nodes;
-    if (visibleNodes.length === 0) return;
-    const minX = Math.min(...visibleNodes.map((node) => node.position.x));
-    const minY = Math.min(...visibleNodes.map((node) => node.position.y));
-    const maxX = Math.max(...visibleNodes.map((node) => node.position.x + GRAPH_NODE_WIDTH));
-    const maxY = Math.max(...visibleNodes.map((node) => node.position.y + GRAPH_NODE_HEIGHT));
-    const paddingRatio = Number(options.padding ?? 0.16);
-    const padding = Math.max(36, Math.min(rect.width, rect.height) * paddingRatio);
-    const minZoom = Number(options.minZoom ?? GRAPH_MIN_ZOOM);
-    const maxZoom = Number(options.maxZoom ?? 1.15);
-    const graphWidth = Math.max(1, maxX - minX);
-    const graphHeight = Math.max(1, maxY - minY);
-    const zoom = clamp(Math.min((rect.width - padding * 2) / graphWidth, (rect.height - padding * 2) / graphHeight), minZoom, maxZoom);
-    animateViewport({
-      x: (rect.width - graphWidth * zoom) / 2 - minX * zoom,
-      y: (rect.height - graphHeight * zoom) / 2 - minY * zoom,
-      zoom
-    }, options.duration);
-  }, [animateViewport, nodes]);
-
-  const focusNode = useCallback((id, options = {}) => {
-    const rect = rootRef.current?.getBoundingClientRect();
-    const node = nodes.find((candidate) => candidate.id === id);
-    if (!rect || !node) return;
-    const zoom = clamp(Number(options.zoom ?? Math.max(viewportRef.current.zoom, 0.96)), GRAPH_MIN_ZOOM, 1.15);
-    animateViewport({
-      x: rect.width / 2 - (node.position.x + GRAPH_NODE_WIDTH / 2) * zoom,
-      y: rect.height / 2 - (node.position.y + GRAPH_NODE_HEIGHT / 2) * zoom,
-      zoom
-    }, options.duration ?? 720);
-  }, [animateViewport, nodes]);
-
-  useEffect(() => {
-    onInit?.({ fitView, focusNode });
-  }, [fitView, focusNode, onInit]);
-
-  const screenToWorld = useCallback((clientX, clientY) => {
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect) return { x: 0, y: 0 };
-    return {
-      x: (clientX - rect.left - viewport.x) / viewport.zoom,
-      y: (clientY - rect.top - viewport.y) / viewport.zoom
-    };
-  }, [viewport]);
-
-  const zoomAtCenter = useCallback((factor) => {
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    cancelViewportAnimation();
-    updateViewport((current) => {
-      const zoom = clamp(current.zoom * factor, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM);
-      const centerX = rect.width / 2;
-      const centerY = rect.height / 2;
-      return {
-        x: centerX - (centerX - current.x) * (zoom / current.zoom),
-        y: centerY - (centerY - current.y) * (zoom / current.zoom),
-        zoom
-      };
-    });
-  }, [cancelViewportAnimation, updateViewport]);
-
-  const beginPan = useCallback((event) => {
-    if (event.button !== 0 || event.target.closest?.(".df-graph__node,.df-graph__controls")) return;
-    event.preventDefault();
-    onPaneClick?.();
-    stopGesture();
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const origin = viewport;
-    setPanning(true);
-    const move = (next) => setViewport({ ...origin, x: origin.x + next.clientX - startX, y: origin.y + next.clientY - startY });
-    const up = () => stopGesture();
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up, { once: true });
-    cleanupRef.current = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [onPaneClick, stopGesture, viewport]);
-
-  const beginNodeDrag = useCallback((node, event) => {
-    if (event.button !== 0 || event.target.closest?.(".df-graph__handle")) return;
-    event.preventDefault();
-    event.stopPropagation();
-    stopGesture();
-    onNodeSelect?.(node.id);
-    onNodeDragStart?.();
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const origin = node.position;
-    setDraggingNode(node.id);
-    const move = (next) => onNodeMove?.(node.id, {
-      x: origin.x + (next.clientX - startX) / viewport.zoom,
-      y: origin.y + (next.clientY - startY) / viewport.zoom
-    });
-    const up = () => stopGesture();
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up, { once: true });
-    cleanupRef.current = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [onNodeDragStart, onNodeMove, onNodeSelect, stopGesture, viewport.zoom]);
-
-  const beginConnection = useCallback((source, event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    stopGesture();
-    const sourceNode = byId.get(source);
-    if (!sourceNode) return;
-    const start = { x: sourceNode.position.x + GRAPH_NODE_WIDTH, y: sourceNode.position.y + GRAPH_NODE_HEIGHT / 2 };
-    setConnectionDraft({ source, start, end: start });
-    const move = (next) => setConnectionDraft((draft) => draft ? { ...draft, end: screenToWorld(next.clientX, next.clientY) } : null);
-    const up = (next) => {
-      const targetElement = document.elementFromPoint(next.clientX, next.clientY)?.closest?.("[data-df-target-id]");
-      const target = targetElement?.getAttribute("data-df-target-id") ?? null;
-      const connection = { source, target, sourceHandle: null, targetHandle: null };
-      if (target) {
-        if (isValidConnection?.(connection) ?? true) onConnect?.(connection);
-        else onConnectionRejected?.(connection);
-      }
-      setConnectionDraft(null);
-      stopGesture();
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up, { once: true });
-    cleanupRef.current = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [byId, isValidConnection, onConnect, onConnectionRejected, screenToWorld, stopGesture]);
-
-  // 画布滚轮/手势：原生 non-passive 监听，preventDefault 才真正生效——
-  // 画布内的一切滚动/缩放手势只作用于画布，不再外溢为页面滚动或浏览器缩放。
-  useEffect(() => {
-    const canvas = rootRef.current;
-    if (!canvas) return undefined;
-    const onCanvasWheel = (event) => {
-      event.preventDefault();
-      cancelViewportAnimation();
-      const rect = canvas.getBoundingClientRect();
-      const cursorX = event.clientX - rect.left;
-      const cursorY = event.clientY - rect.top;
-      if (event.ctrlKey || event.metaKey) {
-        // 缩放：Ctrl/⌘+滚轮，或触控板捏合（捏合手势带 ctrlKey）
-        updateViewport((current) => {
-          const zoom = clamp(current.zoom * Math.exp(-event.deltaY * 0.0012), GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM);
-          return {
-            x: cursorX - (cursorX - current.x) * (zoom / current.zoom),
-            y: cursorY - (cursorY - current.y) * (zoom / current.zoom),
-            zoom
-          };
-        });
-      } else {
-        // 平移：触控板双指滑动 / 鼠标滚轮
-        updateViewport((current) => ({
-          ...current,
-          x: current.x - (Number.isFinite(event.deltaX) ? event.deltaX : 0),
-          y: current.y - (Number.isFinite(event.deltaY) ? event.deltaY : 0)
-        }));
-      }
-    };
-    canvas.addEventListener("wheel", onCanvasWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", onCanvasWheel);
-  }, [cancelViewportAnimation, updateViewport]);
-
-  const edgeElements = [];
-  for (const edge of edges) {
-    const geometry = graphEdgeGeometry(edge, byId);
-    if (!geometry) continue;
-    const selected = selectedEdge === edge.id;
-    const displayLabel = edge.autoLogicLabel
-      ? branchDisplayLabel(gateBranchForEdge(edge), language)
-      : edge.label;
-    edgeElements.push(
-      React.createElement("g", { key: edge.id, className: "df-graph__edge-group", "data-edge-id": edge.id },
-        React.createElement("path", {
-          className: `df-graph__edge${selected ? " is-selected" : ""}`,
-          d: geometry.path,
-          markerEnd: `url(#${markerIdRef.current})`
-        }),
-        React.createElement("path", {
-          className: "df-graph__edge-hit",
-          d: geometry.path,
-          onPointerDown: (event) => event.stopPropagation(),
-          onClick: (event) => {
-            event.stopPropagation();
-            onEdgeSelect?.(edge.id);
-          }
-        }),
-        displayLabel ? React.createElement("g", { transform: `translate(${geometry.label.x} ${geometry.label.y})` },
-          React.createElement("rect", { className: "df-graph__label-bg", x: -18, y: -10, width: 36, height: 20, rx: 7 }),
-          React.createElement("text", { className: "df-graph__label", x: 0, y: 1 }, String(displayLabel))
-        ) : null
-      )
-    );
-  }
-  if (connectionDraft) {
-    const bend = Math.max(54, Math.abs(connectionDraft.end.x - connectionDraft.start.x) * 0.46);
-    edgeElements.push(React.createElement("path", {
-      key: "connection-draft",
-      className: "df-graph__connection",
-      d: `M ${connectionDraft.start.x} ${connectionDraft.start.y} C ${connectionDraft.start.x + bend} ${connectionDraft.start.y}, ${connectionDraft.end.x - bend} ${connectionDraft.end.y}, ${connectionDraft.end.x} ${connectionDraft.end.y}`
-    }));
-  }
-
-  return React.createElement("div", {
-    ref: rootRef,
-    className: `df-canvas${panning ? " is-panning" : ""}`,
-    onPointerDown: beginPan
-  },
-    React.createElement("div", {
-      className: "df-graph__stage",
-      style: { transform: `translate(${viewport.x}px,${viewport.y}px) scale(${viewport.zoom})` }
-    },
-      React.createElement("svg", { className: "df-graph__edges", width: 1, height: 1, "aria-label": "Workflow arrows" },
-        React.createElement("defs", null,
-          React.createElement("marker", {
-            id: markerIdRef.current,
-            markerWidth: 10,
-            markerHeight: 10,
-            refX: 9,
-            refY: 5,
-            orient: "auto",
-            markerUnits: "strokeWidth",
-            viewBox: "0 0 10 10"
-          }, React.createElement("path", { d: "M 0 0 L 10 5 L 0 10 Z", fill: "var(--df-brand)" }))
-        ),
-        edgeElements
-      ),
-      nodes.map((node) => React.createElement("div", {
-        key: node.id,
-        className: `df-graph__node${draggingNode === node.id ? " is-dragging" : ""}`,
-        style: { left: `${node.position.x}px`, top: `${node.position.y}px` },
-        "data-node-id": node.id,
-        onPointerDown: (event) => beginNodeDrag(node, event),
-        onClick: (event) => {
-          event.stopPropagation();
-          onNodeSelect?.(node.id);
-        }
-      },
-        React.createElement(FlowNode, { data: node.data, selected: selectedNode === node.id, language }),
-        React.createElement("button", {
-          type: "button",
-          className: "df-graph__handle df-graph__handle--target",
-          "data-df-target-id": node.id,
-          "aria-label": `Connect into ${String(node.data.label ?? node.id)}`,
-          onPointerDown: (event) => event.stopPropagation()
-        }),
-        React.createElement("button", {
-          type: "button",
-          className: "df-graph__handle df-graph__handle--source",
-          "data-df-source-id": node.id,
-          "aria-label": `Connect from ${String(node.data.label ?? node.id)}`,
-          onPointerDown: (event) => beginConnection(node.id, event)
-        })
-      ))
-    ),
-    React.createElement("div", { className: "df-graph__controls" },
-      React.createElement("button", { type: "button", title: zoomInLabel, "aria-label": zoomInLabel, onClick: () => zoomAtCenter(1.2) }, "+"),
-      React.createElement("button", { type: "button", title: zoomOutLabel, "aria-label": zoomOutLabel, onClick: () => zoomAtCenter(1 / 1.2) }, "−"),
-      React.createElement("button", { type: "button", title: fitLabel, "aria-label": fitLabel, onClick: () => fitView({}) }, "⊙")
-    )
-  );
-}
-
-function branchDisplayLabel(branch, language = browserLanguage()) {
-  return text(language).branchLabel[branch] ?? String(branch ?? "");
-}
-
-function flowToCanvasNodes(flow, language = browserLanguage()) {
-  return (flow?.nodes ?? []).map((node) => ({
-    id: node.id,
-    type: "flow",
-    position: node.position ?? { x: 120, y: 80 },
-    data: {
-      ...node.data,
-      kind: node.kind,
-      ...(node.kind === "condition"
-        ? { gateType: conditionGateType(node, (flow?.edges ?? []).filter((edge) => edge.source === node.id)) }
-        : {}),
-      docPath: flow?.docs?.[node.id] ?? "",
-      language
-    }
-  }));
-}
-
-function flowToCanvasEdges(edges, language = browserLanguage()) {
-  return (edges ?? []).map((edge) => {
-    const branch = gateBranchForEdge(edge);
-    const generatedLabel = !edge.label && branch ? branchDisplayLabel(branch, language) : null;
-    return {
-      ...edge,
-      type: "workflow",
-      ...(edge.label ? { label: edge.label } : {}),
-      ...(generatedLabel ? { label: generatedLabel, autoLogicLabel: true } : {})
-    };
-  });
-}
-
-function serializeFlow(currentFlow, nodes, edges) {
-  const serializedNodes = nodes.map((node) => ({
-    id: node.id,
-    kind: node.data.kind ?? "agent",
-    position: node.position,
-    data: Object.fromEntries(Object.entries(node.data).filter(([key]) => key !== "kind" && key !== "docPath" && key !== "language"))
-  }));
-  return {
-    ...currentFlow,
-    nodes: serializedNodes,
-    edges: edges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      ...(!edge.autoLogicLabel && edge.label ? { label: edge.label } : {}),
-      ...(edge.sourceHandle === null || edge.sourceHandle === undefined ? {} : { sourceHandle: edge.sourceHandle })
-    })),
-    inputs: serializedNodes.filter((node) => node.kind === "input").map((node) => node.id),
-    outputs: serializedNodes.filter((node) => node.kind === "output").map((node) => node.id)
-  };
-}
-
-function connectionProblem(nodes, edges, connection, branch = null) {
-  if (!connection?.source || !connection?.target) return { valid: false, code: "invalidConnection" };
-  if (connection.source === connection.target) return { valid: false, code: "invalidConnection" };
-  if (edges.some((edge) => edge.source === connection.source && edge.target === connection.target && edge.id !== connection.edgeId)) {
-    return { valid: false, code: "duplicateConnection" };
-  }
-  const sourceNode = nodes.find((node) => node.id === connection.source);
-  const targetNode = nodes.find((node) => node.id === connection.target);
-  if (!sourceNode || !targetNode) return { valid: false, code: "invalidConnection" };
-  if (sourceNode.data?.kind !== "condition") return { valid: true, code: "ok" };
-  const outgoing = edges.filter((edge) => edge.source === connection.source);
-  const gateType = conditionGateType(sourceNode, outgoing);
-  const available = availableGateBranches(gateType, outgoing, connection.edgeId ?? null);
-  if (branch === null || branch === undefined) {
-    if (available.length > 0) return { valid: true, code: "ok", gateType, available };
-    return { valid: false, code: gateType === "ifElse" ? "ifElseFull" : "notFull", gateType, available };
-  }
-  const result = validateGateBranch(gateType, outgoing, branch, connection.edgeId ?? null);
-  return result.valid ? { ...result, available } : result;
-}
-
-function connectionProblemMessage(problem, copy) {
-  if (!problem || problem.valid) return "";
-  if (problem.code === "duplicateConnection") return copy.duplicateConnection;
-  if (problem.code === "ifElseFull") return copy.ifElseFull;
-  if (problem.code === "gateLimit" || problem.code === "notFull") return copy.notFull;
-  if (problem.code === "branchUsed") return copy.branchUsed;
-  if (problem.code === "logicMismatch") return copy.gateMismatch;
-  return copy.invalidConnection;
-}
-
-function graphSnapshot(nodes, edges) {
-  return JSON.parse(JSON.stringify({ nodes, edges }));
-}
-
-function reconnectFlowEdge(oldEdge, connection, edges) {
-  return edges.map((edge) => edge.id === oldEdge.id ? {
-    ...edge,
-    source: connection.source,
-    target: connection.target,
-    sourceHandle: connection.sourceHandle ?? null,
-    targetHandle: connection.targetHandle ?? null
-  } : edge);
-}
-
-function layoutNodes(nodes, edges) {
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const indegree = new Map(nodes.map((node) => [node.id, 0]));
-  const outgoing = new Map(nodes.map((node) => [node.id, []]));
-  for (const edge of edges) {
-    if (!byId.has(edge.source) || !byId.has(edge.target)) continue;
-    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
-    outgoing.get(edge.source).push(edge.target);
-  }
-  const queue = nodes.filter((node) => indegree.get(node.id) === 0).map((node) => node.id);
-  const level = new Map(queue.map((id) => [id, 0]));
-  const order = [];
-  while (queue.length) {
-    const id = queue.shift();
-    order.push(id);
-    for (const next of outgoing.get(id) ?? []) {
-      level.set(next, Math.max(level.get(next) ?? 0, (level.get(id) ?? 0) + 1));
-      indegree.set(next, (indegree.get(next) ?? 0) - 1);
-      if (indegree.get(next) === 0) queue.push(next);
-    }
-  }
-  nodes.forEach((node, index) => {
-    if (!level.has(node.id)) level.set(node.id, Math.max(0, order.length ? Math.max(...level.values()) + 1 : index));
-  });
-  const rows = new Map();
-  return nodes.map((node) => {
-    const column = level.get(node.id) ?? 0;
-    const row = rows.get(column) ?? 0;
-    rows.set(column, row + 1);
-    return { ...node, position: { x: 70 + column * 245, y: 90 + row * 160 } };
-  });
-}
-
-function logicSnapshot(flow) {
-  return JSON.stringify({
-    workflowContent: String(flow?.workflowContent ?? ""),
-    docs: flow?.docs ?? {},
-    nodes: (flow?.nodes ?? []).map((node) => ({
-      id: node.id,
-      kind: node.kind,
-      label: node.data?.label ?? "",
-      gateType: node.kind === "condition" ? normalizeGateType(node.data?.gateType) : "",
-      content: node.kind === "agent" || node.kind === "mapAgent"
-        ? String(node.data?.prompt ?? "")
-        : String(node.data?.instructions ?? "")
-    })),
-    edges: (flow?.edges ?? []).map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      sourceHandle: gateBranchForEdge(edge) ?? "",
-      targetHandle: edge.targetHandle ?? ""
-    }))
-  });
-}
-
+// Canvas rendering and graph transformations live in focused, independently testable modules.
 const PANEL_COLLAPSE_THRESHOLD = 108;
 const LEFT_PANEL_DEFAULT = 264;
 const RIGHT_PANEL_DEFAULT = 380;
@@ -1171,12 +143,18 @@ function Studio({ connection, sessionId, language }) {
   // 需求 6：每个文档的优化方案独立保留（切文档不丢、并发互不覆盖）。
   const proposalStoreRef = React.useRef(new Map());
   const pollTimerRef = React.useRef(null);
+  const topologyPollRef = React.useRef(null);
   const [workflowOptimizeConfirm, setWorkflowOptimizeConfirm] = useState(false);
+  const [topologyApplyConfirm, setTopologyApplyConfirm] = useState(false);
+  const [topologyApplyBusy, setTopologyApplyBusy] = useState(false);
+  const [persistedTopologySignature, setPersistedTopologySignature] = useState("");
   const fileRef = React.useRef(null);
   const documentTimerRef = React.useRef(null);
   const fitTimerRef = React.useRef(null);
   const documentWriteChainRef = React.useRef(Promise.resolve());
   const documentRevisionRef = React.useRef(0);
+  const persistedRevisionRef = React.useRef(new Map());
+  const persistedFlowRef = React.useRef(null);
   const optimizationRequestRef = React.useRef(0);
   const activeAssistRef = React.useRef(null);
   const currentIdRef = React.useRef(null);
@@ -1318,10 +296,13 @@ function Studio({ connection, sessionId, language }) {
 
   const showFlow = useCallback((flow, options = {}) => {
     if (!flow) return;
+    persistedRevisionRef.current.set(flow.id, Number(flow.revision) || 0);
+    persistedFlowRef.current = flow;
+    setPersistedTopologySignature(topologySignature(flow));
     currentIdRef.current = flow.id;
     setCurrentId(flow.id);
-    setNodes(flowToCanvasNodes(flow, language));
-    setEdges(flowToCanvasEdges(flow.edges, language));
+    setNodes(flowToCanvasNodes(flow, loadPositionOverrides(flow.id)));
+    setEdges(flowToCanvasEdges(flow.edges, t));
     historyRef.current = { past: [], future: [] };
     setSelectedEdge(null);
     setValidationResult(null);
@@ -1329,11 +310,13 @@ function Studio({ connection, sessionId, language }) {
     setOptimizationProposal(null);
     setAssistantDraft("");
     setWorkflowOptimizeConfirm(false);
+    setTopologyApplyConfirm(false);
+    setTopologyApplyBusy(false);
     if (options.resetDocument !== false) {
       setSelected(null);
       setActiveDoc("workflow");
     }
-  }, [language, setEdges, setNodes]);
+  }, [setEdges, setNodes, t]);
 
   const loadFlows = useCallback(async () => {
     try {
@@ -1344,6 +327,8 @@ function Studio({ connection, sessionId, language }) {
         showFlow(first, { resetDocument: currentIdRef.current !== first.id });
       } else {
         currentIdRef.current = null;
+        persistedFlowRef.current = null;
+        setPersistedTopologySignature("");
         setCurrentId(null);
         setNodes([]);
         setEdges([]);
@@ -1429,6 +414,28 @@ function Studio({ connection, sessionId, language }) {
               activeAssistRef.current = null;
               setAssistantBusy(null);
             });
+          } else if (entry.mode === "topology-apply" && entry.status === "running") {
+            const requestId = entry.key.split(":").pop();
+            setTopologyApplyBusy(true);
+            setMessage(t.topologyApplying);
+            topologyPollRef.current?.();
+            topologyPollRef.current = pollAssist(requestId, (finalEntry) => {
+              topologyPollRef.current = null;
+              setTopologyApplyBusy(false);
+              if (finalEntry.status === "done" && finalEntry.result?.flow) {
+                showFlow(finalEntry.result.flow, { resetDocument: false });
+                setDirty(false);
+                setMessage(finalEntry.result.summary ? `${t.topologyApplied}：${finalEntry.result.summary}` : t.topologyApplied);
+              } else {
+                setMessage(t.topologyApplyFailed + String(finalEntry.error ?? ""));
+              }
+            });
+          } else if (entry.mode === "topology-apply" && entry.status === "done" && entry.result?.flow) {
+            const knownRevision = persistedRevisionRef.current.get(entry.result.flow.id) ?? 0;
+            if (Number(entry.result.flow.revision) > knownRevision) {
+              showFlow(entry.result.flow, { resetDocument: false });
+              setDirty(false);
+            }
           }
         }
         const proposal = proposalStoreRef.current.get(assistantTargetRef.current);
@@ -1470,6 +477,7 @@ function Studio({ connection, sessionId, language }) {
     if (documentTimerRef.current) clearTimeout(documentTimerRef.current);
     if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
     if (pollTimerRef.current) pollTimerRef.current();
+    if (topologyPollRef.current) topologyPollRef.current();
     if (panelDragRef.current) {
       window.removeEventListener("pointermove", panelDragRef.current.onMove);
       window.removeEventListener("pointerup", panelDragRef.current.onUp);
@@ -1499,14 +507,12 @@ function Studio({ connection, sessionId, language }) {
   useEffect(() => {
     if (!flowInstance || !currentId || nodes.length === 0) return undefined;
     if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
-    if (pollTimerRef.current) pollTimerRef.current();
     fitTimerRef.current = setTimeout(() => {
       fitTimerRef.current = null;
       flowInstance.fitView({ padding: 0.18, minZoom: GRAPH_MIN_ZOOM, maxZoom: 1.15, duration: 320 });
     }, 600);
     return () => {
       if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
-    if (pollTimerRef.current) pollTimerRef.current();
     };
   }, [currentId, flowInstance, nodes.length]);
 
@@ -1523,30 +529,77 @@ function Studio({ connection, sessionId, language }) {
   };
 
   const currentFlow = flows.find((f) => f.id === currentId) ?? null;
+  const currentDraftFlow = currentFlow ? serializeFlow(currentFlow, nodes, edges) : null;
+  const currentTopologySignature = currentDraftFlow ? topologySignature(currentDraftFlow) : "";
+  const topologyDirty = Boolean(currentDraftFlow && currentTopologySignature !== persistedTopologySignature);
+  const topologyDelta = currentDraftFlow
+    ? topologyDiff(persistedFlowRef.current ?? {
+        ...currentDraftFlow,
+        nodes: [],
+        edges: [],
+        inputs: [],
+        outputs: []
+      }, currentDraftFlow)
+    : null;
   const selectedNode = nodes.find((n) => n.id === selected) ?? null;
+  const selectedConditionInputs = selectedNode?.data?.kind === "condition"
+    ? edges
+        .filter((edge) => edge.target === selectedNode.id)
+        .map((edge) => {
+          const source = nodes.find((node) => node.id === edge.source);
+          return { edgeId: edge.id, sourceId: edge.source, label: source?.data?.label ?? edge.source };
+        })
+    : [];
+  const selectedGateRule = selectedNode?.data?.kind === "condition"
+    ? gateRule(selectedNode.data.gateType)
+    : null;
+  const selectedGateArityValid = !selectedGateRule
+    || (selectedConditionInputs.length >= selectedGateRule.minInputs
+      && selectedConditionInputs.length <= selectedGateRule.maxInputs);
+
+  const persistDocumentSnapshot = useCallback(async (flowSnapshot, nodeSnapshot, edgeSnapshot) => {
+    if (!flowSnapshot?.id) return null;
+    let editorFlow;
+    const operation = documentWriteChainRef.current.catch(() => {}).then(async () => {
+      const persisted = persistedFlowRef.current;
+      if (!persisted || persisted.id !== flowSnapshot.id) return null;
+      editorFlow = serializeFlow(flowSnapshot, nodeSnapshot, edgeSnapshot);
+      const documentOnly = mergeDocumentEdits(persisted, editorFlow, nodeSnapshot);
+      const persistedRevision = persistedRevisionRef.current.get(documentOnly.id);
+      const payload = Number.isInteger(persistedRevision)
+        ? { ...documentOnly, revision: persistedRevision }
+        : documentOnly;
+      return remoteCall(connection, "dflow/put", { flow: payload, sessionId });
+    });
+    documentWriteChainRef.current = operation.then(() => undefined, () => undefined);
+    const saved = await operation;
+    if (!saved) return null;
+    persistedFlowRef.current = saved;
+    persistedRevisionRef.current.set(saved.id, Number(saved.revision) || 0);
+    setPersistedTopologySignature(topologySignature(saved));
+    setFlows((items) => items.map((item) => item.id === saved.id ? { ...item, ...saved } : item));
+    setDirty(topologySignature(editorFlow) !== topologySignature(saved));
+    return saved;
+  }, [connection, sessionId]);
 
   const scheduleDocumentSave = useCallback((flowSnapshot, nodeSnapshot, edgeSnapshot) => {
     if (!flowSnapshot?.id) return;
+    if (!persistedFlowRef.current || persistedFlowRef.current.id !== flowSnapshot.id) {
+      setMessage(t.topologyApplyFirst);
+      return;
+    }
     if (documentTimerRef.current) clearTimeout(documentTimerRef.current);
-    const revision = ++documentRevisionRef.current;
+    const editRevision = ++documentRevisionRef.current;
     setMessage(t.autoSaving);
     documentTimerRef.current = setTimeout(() => {
-      const payload = serializeFlow(flowSnapshot, nodeSnapshot, edgeSnapshot);
       documentTimerRef.current = null;
-      documentWriteChainRef.current = documentWriteChainRef.current.catch(() => {}).then(async () => {
-        try {
-          const saved = await remoteCall(connection, "dflow/put", { flow: payload, sessionId });
-          if (documentRevisionRef.current === revision) {
-            setFlows((items) => items.map((item) => item.id === saved.id ? { ...item, ...saved } : item));
-            setDirty(false);
-            setMessage(t.autoSaved);
-          }
-        } catch (error) {
-          if (documentRevisionRef.current === revision) setMessage(String(error));
-        }
+      persistDocumentSnapshot(flowSnapshot, nodeSnapshot, edgeSnapshot).then(() => {
+        if (documentRevisionRef.current === editRevision) setMessage(t.autoSaved);
+      }).catch((error) => {
+        if (documentRevisionRef.current === editRevision) setMessage(String(error));
       });
     }, 650);
-  }, [connection, sessionId, t.autoSaved, t.autoSaving]);
+  }, [persistDocumentSnapshot, t.autoSaved, t.autoSaving, t.topologyApplyFirst]);
 
   const rememberGraph = useCallback(() => {
     const snapshot = graphSnapshot(nodesRef.current, edgesRef.current);
@@ -1610,7 +663,7 @@ function Studio({ connection, sessionId, language }) {
       type: "workflow",
       ...(condition ? {
         sourceHandle: branch,
-        label: branchDisplayLabel(branch, language),
+        label: branchDisplayLabel(branch, t),
         autoLogicLabel: true
       } : {})
     };
@@ -1621,7 +674,7 @@ function Studio({ connection, sessionId, language }) {
     ++documentRevisionRef.current;
     setDirty(true);
     return true;
-  }, [language, rememberGraph, setEdges, showConnectionWarning]);
+  }, [rememberGraph, setEdges, showConnectionWarning, t]);
 
   const onConnect = useCallback((conn) => {
     const problem = connectionProblem(nodesRef.current, edgesRef.current, conn);
@@ -1651,13 +704,13 @@ function Studio({ connection, sessionId, language }) {
     setEdges((items) => reconnectFlowEdge(oldEdge, connectionParams, items).map((edge) => edge.id === oldEdge.id
       ? {
           ...edge,
-          label: branchDisplayLabel(gateBranchForEdge(connectionParams), language),
+          label: branchDisplayLabel(gateBranchForEdge(connectionParams), t),
           autoLogicLabel: true
         }
       : edge));
     ++documentRevisionRef.current;
     setDirty(true);
-  }, [language, rememberGraph, setEdges]);
+  }, [rememberGraph, setEdges, t]);
 
   const isValidConnection = useCallback((connectionParams) => {
     return connectionProblem(nodesRef.current, edgesRef.current, connectionParams).valid;
@@ -1665,6 +718,15 @@ function Studio({ connection, sessionId, language }) {
 
   const moveNode = useCallback((id, position) => {
     setNodes((items) => items.map((node) => node.id === id ? { ...node, position } : node));
+    // 位置是查看状态（与面板宽度同级），随移动静默持久化，不参与拓扑事务。
+    try {
+      const key = `deepseek-flow:positions:${currentId}`;
+      const stored = JSON.parse(localStorage.getItem(key) ?? "{}");
+      stored[id] = position;
+      localStorage.setItem(key, JSON.stringify(stored));
+    } catch {
+      // 存储不可用时忽略
+    }
     ++documentRevisionRef.current;
     setDirty(true);
   }, []);
@@ -1679,7 +741,6 @@ function Studio({ connection, sessionId, language }) {
       data: {
         kind,
         label: t.nodeKind[kind] ?? kind,
-        language,
         ...(kind === "condition" ? { gateType: normalizeGateType(gateType) } : {}),
         ...(kind === "agent" || kind === "mapAgent" ? { prompt: "{{input}}" } : {})
       }
@@ -1707,10 +768,11 @@ function Studio({ connection, sessionId, language }) {
     setNodes(nextNodes);
     nodesRef.current = nextNodes;
     setDirty(true);
-    if (Object.hasOwn(patch, "prompt") || Object.hasOwn(patch, "instructions")) {
-      scheduleDocumentSave(currentFlow, nextNodes, edges);
-    } else {
+    const topologyKeys = ["label", "gateType", "predicate", "inputPredicates", "order"];
+    if (Object.keys(patch).some((key) => topologyKeys.includes(key))) {
       ++documentRevisionRef.current;
+    } else {
+      scheduleDocumentSave(currentFlow, nextNodes, edges);
     }
   };
 
@@ -1783,16 +845,17 @@ function Studio({ connection, sessionId, language }) {
 
   const save = async () => {
     if (currentId === null) return false;
-    const flow = serializeFlow({ ...currentFlow, id: currentId, name: currentFlow?.name ?? currentId }, nodes, edges);
+    if (topologyDirty || !persistedFlowRef.current) {
+      setTopologyApplyConfirm(true);
+      setMessage(t.topologyPending);
+      return false;
+    }
     if (documentTimerRef.current) clearTimeout(documentTimerRef.current);
     documentTimerRef.current = null;
     ++documentRevisionRef.current;
     setMessage(t.saving);
     try {
-      await documentWriteChainRef.current.catch(() => {});
-      const saved = await remoteCall(connection, "dflow/put", { flow, sessionId });
-      setFlows((items) => items.map((item) => item.id === saved.id ? saved : item));
-      showFlow(saved, { resetDocument: false });
+      await persistDocumentSnapshot(currentFlow, nodes, edges);
       setDirty(false);
       setMessage(t.saved);
       return true;
@@ -1808,14 +871,26 @@ function Studio({ connection, sessionId, language }) {
     try {
       const flow = JSON.parse(await file.text());
       if (!flow.id || !Array.isArray(flow.nodes)) throw new Error("missing id/nodes");
+      const existing = flows.find((candidate) => candidate.id === flow.id) ?? null;
       currentIdRef.current = flow.id;
       setCurrentId(flow.id);
       setFlows((fs) => [flow, ...fs.filter((f) => f.id !== flow.id)]);
-      setNodes(flowToCanvasNodes(flow, language));
-      setEdges(flowToCanvasEdges(flow.edges, language));
+      persistedFlowRef.current = existing;
+      if (existing) persistedRevisionRef.current.set(flow.id, Number(existing.revision) || 0);
+      else persistedRevisionRef.current.delete(flow.id);
+      setPersistedTopologySignature(topologySignature(existing ?? {
+        ...flow,
+        nodes: [],
+        edges: [],
+        inputs: [],
+        outputs: []
+      }));
+      setNodes(flowToCanvasNodes(flow, loadPositionOverrides(flow.id)));
+      setEdges(flowToCanvasEdges(flow.edges, t));
       setSelected(null);
       setActiveDoc("workflow");
       setDirty(true);
+      setTopologyApplyConfirm(false);
       setMessage(t.importOk + flow.name);
     } catch (error) {
       setMessage(t.invalidJson + String(error));
@@ -1871,6 +946,80 @@ function Studio({ connection, sessionId, language }) {
       }
     }, 3000);
     return () => clearInterval(timer);
+  };
+
+  const applyTopologyChanges = async () => {
+    if (!currentFlow || !currentDraftFlow || topologyApplyBusy) return;
+    setTopologyApplyConfirm(false);
+    setTopologyApplyBusy(true);
+    setMessage(t.topologyApplying);
+    const requestId = newRequestId();
+    try {
+      if (documentTimerRef.current) clearTimeout(documentTimerRef.current);
+      documentTimerRef.current = null;
+      // Commit only existing Markdown first. Its payload is merged onto the
+      // persisted graph, so this cannot smuggle the topology draft past review.
+      if (persistedFlowRef.current) {
+        await persistDocumentSnapshot(currentFlow, nodes, edges);
+      } else {
+        await documentWriteChainRef.current.catch(() => {});
+      }
+      const draftFlow = serializeFlow(currentFlow, nodesRef.current, edgesRef.current);
+      const submittedSignature = topologySignature(draftFlow);
+      const baseFlow = persistedFlowRef.current ?? {
+        ...draftFlow,
+        nodes: [],
+        edges: [],
+        inputs: [],
+        outputs: []
+      };
+      const accepted = await remoteCall(connection, "dflow/topologyApply", {
+        request: {
+          sessionId,
+          requestId,
+          draftFlow,
+          baseTopology: topologyProjection(baseFlow),
+          ...(assistModel ? { model: assistModel } : {}),
+          ...(assistEffort ? { reasoningEffort: assistEffort } : {})
+        }
+      });
+      if (!accepted?.accepted) {
+        setTopologyApplyBusy(false);
+        setDirty(false);
+        setMessage(t.topologyNoChanges);
+        return;
+      }
+      topologyPollRef.current?.();
+      topologyPollRef.current = pollAssist(requestId, (entry) => {
+        topologyPollRef.current = null;
+        setTopologyApplyBusy(false);
+        if (entry.status !== "done" || !entry.result?.flow) {
+          setMessage(t.topologyApplyFailed + String(entry.error ?? ""));
+          return;
+        }
+        const saved = entry.result.flow;
+        persistedFlowRef.current = saved;
+        persistedRevisionRef.current.set(saved.id, Number(saved.revision) || 0);
+        setPersistedTopologySignature(topologySignature(saved));
+        setFlows((items) => items.map((item) => item.id === saved.id ? { ...item, ...saved } : item));
+        const liveFlow = serializeFlow(
+          currentIdRef.current === saved.id ? (flows.find((item) => item.id === saved.id) ?? saved) : saved,
+          nodesRef.current,
+          edgesRef.current
+        );
+        if (currentIdRef.current === saved.id && topologySignature(liveFlow) === submittedSignature) {
+          showFlow(saved, { resetDocument: false });
+          setDirty(false);
+          setMessage(entry.result.summary ? `${t.topologyApplied}：${entry.result.summary}` : t.topologyApplied);
+        } else if (currentIdRef.current === saved.id) {
+          setDirty(true);
+          setMessage(t.topologyAppliedWithNewDraft);
+        }
+      });
+    } catch (error) {
+      setTopologyApplyBusy(false);
+      setMessage(t.topologyApplyFailed + String(error));
+    }
   };
 
   const runLogicValidation = async () => {
@@ -1952,6 +1101,11 @@ function Studio({ connection, sessionId, language }) {
 
   const runWorkflowOptimization = async () => {
     if (!currentFlow) return;
+    if (!persistedFlowRef.current) {
+      setWorkflowOptimizeConfirm(false);
+      setMessage(t.topologyApplyFirst);
+      return;
+    }
     setWorkflowOptimizeConfirm(false);
     const agentRequestId = newRequestId();
     const flow = serializeFlow(currentFlow, nodes, edges);
@@ -2005,15 +1159,30 @@ function Studio({ connection, sessionId, language }) {
         documentTimerRef.current = null;
         ++documentRevisionRef.current;
         await documentWriteChainRef.current.catch(() => {});
-        const saved = await remoteCall(connection, "dflow/put", { flow: optimizedFlow, sessionId });
+        const documentOnly = mergeDocumentEdits(persistedFlowRef.current, optimizedFlow, optimizedFlow.nodes);
+        const persistedRevision = persistedRevisionRef.current.get(documentOnly.id);
+        const payload = Number.isInteger(persistedRevision)
+          ? { ...documentOnly, revision: persistedRevision }
+          : documentOnly;
+        const saved = await remoteCall(connection, "dflow/put", { flow: payload, sessionId });
+        persistedFlowRef.current = saved;
+        persistedRevisionRef.current.set(saved.id, Number(saved.revision) || 0);
+        setPersistedTopologySignature(topologySignature(saved));
         if (currentIdRef.current !== flowId) {
           activeAssistRef.current = null;
           setAssistantBusy(null);
           return;
         }
-        setFlows((items) => items.map((item) => item.id === saved.id ? saved : item));
-        showFlow(saved, { resetDocument: false });
-        setDirty(false);
+        setFlows((items) => items.map((item) => item.id === saved.id ? { ...item, ...saved } : item));
+        if (topologySignature(optimizedFlow) === topologySignature(saved)) {
+          showFlow(saved, { resetDocument: false });
+          setDirty(false);
+        } else {
+          const draftNodes = flowToCanvasNodes({ ...optimizedFlow, docs: saved.docs });
+          setNodes(draftNodes);
+          nodesRef.current = draftNodes;
+          setDirty(true);
+        }
         setMessage(result.summary ? `${t.workflowOptimized}：${result.summary}` : t.workflowOptimized);
         activeAssistRef.current = null;
         setAssistantBusy(null);
@@ -2255,8 +1424,28 @@ function Studio({ connection, sessionId, language }) {
           selectedNode.data.kind === "condition" &&
             React.createElement("label", { key: "predicate" }, t.predicate,
               React.createElement("select", { value: selectedNode.data.predicate ?? "truthy", onChange: (e) => patchSelected({ predicate: e.target.value }) },
-                ["truthy", "falsy", "nonEmpty"].map((p) => React.createElement("option", { key: p, value: p }, p))
+                LOGIC_PREDICATES.map((p) => React.createElement("option", { key: p, value: p }, p))
               )
+            ),
+          selectedNode.data.kind === "condition" &&
+            React.createElement("div", { key: "logicInputs", className: "df-advanced__content" },
+              React.createElement("strong", null, t.logicInputs),
+              React.createElement("span", {
+                style: { color: selectedGateArityValid ? "var(--df-ink-2)" : "var(--df-err)", fontSize: 12 }
+              }, `${t.logicInputCount}: ${selectedConditionInputs.length} · ${selectedGateRule.maxInputs === 1 ? t.logicInputUnary : t.logicInputAggregate}`),
+              selectedConditionInputs.length === 0
+                ? React.createElement("span", { style: { color: "var(--df-ink-2)", fontSize: 12 } }, t.logicInputsEmpty)
+                : selectedConditionInputs.map((input) => React.createElement("label", { key: input.edgeId }, `${input.label} · ${input.sourceId}`,
+                    React.createElement("select", {
+                      value: selectedNode.data.inputPredicates?.[input.sourceId] ?? selectedNode.data.predicate ?? "truthy",
+                      onChange: (event) => patchSelected({
+                        inputPredicates: {
+                          ...(selectedNode.data.inputPredicates ?? {}),
+                          [input.sourceId]: event.target.value
+                        }
+                      })
+                    }, LOGIC_PREDICATES.map((predicate) => React.createElement("option", { key: predicate, value: predicate }, predicate)))
+                  ))
             ),
           (selectedNode.data.kind === "agent" || selectedNode.data.kind === "mapAgent") &&
             React.createElement("details", { key: "advanced", className: "df-advanced" },
@@ -2364,9 +1553,19 @@ function Studio({ connection, sessionId, language }) {
       ),
       React.createElement("span", { className: "df-assistant__target", title: `${t.assistantTarget}: ${assistantDocLabel}` }, assistantDocLabel),
       React.createElement("div", { className: "df-assistant__actions" },
-        React.createElement("button", { className: "df-btn is-primary", "data-df-action": "logic-validation", disabled: !currentFlow, onClick: runLogicValidation }, assistantBusy === "logic" ? t.agentLogicBusy : t.logicValidation),
+        React.createElement("button", {
+          className: `df-btn is-primary${topologyDirty ? " is-disabled" : ""}`,
+          "data-df-action": "logic-validation",
+          "aria-disabled": topologyDirty ? "true" : undefined,
+          onClick: () => { if (topologyDirty) { setMessage(t.topologyPending); return; } runLogicValidation(); }
+        }, assistantBusy === "logic" ? t.agentLogicBusy : t.logicValidation),
         React.createElement("button", { className: "df-btn", "data-df-action": "optimize-document", disabled: !currentFlow, onClick: runDocumentOptimization }, runningDocs.get(assistantTarget) !== undefined ? t.agentOptimizeBusy : t.aiOptimize),
-        React.createElement("button", { className: "df-btn", "data-df-action": "optimize-workflow", disabled: !currentFlow, onClick: () => setWorkflowOptimizeConfirm(true) }, assistantBusy === "optimize-workflow" ? t.agentWorkflowBusy : t.aiOptimizeWorkflow),
+        React.createElement("button", {
+          className: `df-btn${topologyDirty ? " is-disabled" : ""}`,
+          "data-df-action": "optimize-workflow",
+          "aria-disabled": topologyDirty ? "true" : undefined,
+          onClick: () => { if (topologyDirty) { setMessage(t.topologyPending); return; } setWorkflowOptimizeConfirm(true); }
+        }, assistantBusy === "optimize-workflow" ? t.agentWorkflowBusy : t.aiOptimizeWorkflow),
         (assistantBusy || runningDocs.get(assistantTarget) !== undefined) && React.createElement("button", {
           className: "df-btn is-ghost",
           "data-df-action": "cancel-agent",
@@ -2468,6 +1667,32 @@ function Studio({ connection, sessionId, language }) {
     )
   );
 
+  const topologyConfirmDialog = topologyApplyConfirm && React.createElement("div", {
+    className: "df-confirm-backdrop",
+    role: "presentation",
+    onPointerDown: (event) => {
+      if (event.target === event.currentTarget && !topologyApplyBusy) setTopologyApplyConfirm(false);
+    }
+  },
+    React.createElement("div", { className: "df-confirm", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "df-topology-apply-title" },
+      React.createElement("h3", { id: "df-topology-apply-title" }, t.topologyApplyTitle),
+      React.createElement("p", null, t.topologyApplyWarning),
+      topologyDelta && React.createElement("div", { className: "df-topology-summary" },
+        React.createElement("span", null, `${t.topologyNodes}: +${topologyDelta.nodes.added.length} / −${topologyDelta.nodes.removed.length} / ~${topologyDelta.nodes.changed.length}`),
+        React.createElement("span", null, `${t.topologyEdges}: +${topologyDelta.edges.added.length} / −${topologyDelta.edges.removed.length} / ~${topologyDelta.edges.changed.length}`)
+      ),
+      React.createElement("div", { className: "df-confirm__actions" },
+        React.createElement("button", { className: "df-btn", disabled: topologyApplyBusy, onClick: () => setTopologyApplyConfirm(false) }, t.cancel),
+        React.createElement("button", {
+          className: "df-btn is-primary",
+          "data-df-action": "confirm-apply-topology",
+          disabled: topologyApplyBusy,
+          onClick: applyTopologyChanges
+        }, topologyApplyBusy ? t.topologyApplying : t.topologyApplyConfirm)
+      )
+    )
+  );
+
   const gatePickerDialog = gatePickerOpen && React.createElement("div", {
     className: "df-confirm-backdrop",
     role: "presentation",
@@ -2545,6 +1770,20 @@ function Studio({ connection, sessionId, language }) {
     )
   );
 
+  const topologyApplyButton = topologyDirty && React.createElement("div", { className: "df-topology-apply" },
+    React.createElement("button", {
+      type: "button",
+      className: "df-btn is-primary",
+      "data-df-action": "apply-topology",
+      disabled: topologyApplyBusy,
+      onClick: () => setTopologyApplyConfirm(true)
+    },
+      React.createElement("span", { className: "df-topology-apply__icon", "aria-hidden": true }, topologyApplyBusy ? "◌" : "✓"),
+      React.createElement("span", null, topologyApplyBusy ? t.topologyApplying : t.topologyApply),
+      topologyDelta?.count > 0 && React.createElement("span", { className: "df-topology-apply__count" }, topologyDelta.count)
+    )
+  );
+
   const panelBudget = Math.max(0, studioWidth - 340 - 18);
   let effectiveDocumentWidth = documentsOpen ? Math.min(documentWidth, studioWidth * 0.42) : 0;
   let effectiveInspectorWidth = inspectorOpen ? Math.min(inspectorWidth, studioWidth * 0.46) : 0;
@@ -2611,41 +1850,45 @@ function Studio({ connection, sessionId, language }) {
     leftSplitter,
     React.createElement("div", { className: "df-canvas-shell", ref: canvasShellRef },
       workflowConfirmDialog,
+      topologyConfirmDialog,
       gatePickerDialog,
       branchPickerDialog,
       connectionWarningDialog,
       toolbar,
-      React.createElement(GraphCanvas, {
-        nodes,
-        edges,
-        language,
-        selectedNode: selected,
-        selectedEdge,
-        onInit: setFlowInstance,
-        onNodeDragStart: rememberGraph,
-        onNodeMove: moveNode,
-        onNodeSelect: (id) => {
-          setSelected(id);
-          setSelectedEdge(null);
-          setActiveDoc(id);
-        },
-        onEdgeSelect: (id) => {
-          setSelected(null);
-          setSelectedEdge(id);
-          setMessage(t.edgeSelected);
-        },
-        onPaneClick: () => {
-          setSelected(null);
-          setSelectedEdge(null);
-        },
-        onConnect,
-        onConnectionRejected,
-        onReconnect,
-        isValidConnection,
-        fitLabel: t.fitAll,
-        zoomInLabel: t.zoomIn,
-        zoomOutLabel: t.zoomOut
-      }),
+      React.createElement("div", { className: "df-canvas-stage" },
+        React.createElement(GraphCanvas, {
+          nodes,
+          edges,
+          copy: t,
+          selectedNode: selected,
+          selectedEdge,
+          onInit: setFlowInstance,
+          onNodeDragStart: rememberGraph,
+          onNodeMove: moveNode,
+          onNodeSelect: (id) => {
+            setSelected(id);
+            setSelectedEdge(null);
+            setActiveDoc(id);
+          },
+          onEdgeSelect: (id) => {
+            setSelected(null);
+            setSelectedEdge(id);
+            setMessage(t.edgeSelected);
+          },
+          onPaneClick: () => {
+            setSelected(null);
+            setSelectedEdge(null);
+          },
+          onConnect,
+          onConnectionRejected,
+          onReconnect,
+          isValidConnection,
+          fitLabel: t.fitAll,
+          zoomInLabel: t.zoomIn,
+          zoomOutLabel: t.zoomOut
+        }),
+        topologyApplyButton
+      ),
       addBar,
       assistantSplitter,
       assistantPanel

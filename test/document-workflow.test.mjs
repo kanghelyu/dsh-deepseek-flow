@@ -52,6 +52,126 @@ test("disk Markdown overrides node content when a flow is loaded", async () => {
   assert.equal(loaded.nodes.find((node) => node.id === "step-02").data.prompt, "# 调试\n\n每个关键状态都截图。");
 });
 
+test("flow-first document policy keeps an explicit JSON prompt and disk-first remains opt-in", async () => {
+  const { flow } = await fixture();
+  await writeFlowDocuments(flow);
+  const stepPath = join(flow.docRoot, flow.docs["step-02"]);
+  await writeFile(stepPath, "# 磁盘旧内容\n", "utf8");
+  const changed = {
+    ...flow,
+    nodes: flow.nodes.map((node) => node.id === "step-02"
+      ? { ...node, data: { ...node.data, prompt: "# JSON 新内容" } }
+      : node)
+  };
+
+  const flowFirst = await loadFlowDocuments(changed, { policy: "prefer-flow" });
+  const diskFirst = await loadFlowDocuments(changed, { policy: "prefer-disk" });
+
+  assert.equal(flowFirst.nodes.find((node) => node.id === "step-02").data.prompt, "# JSON 新内容");
+  assert.equal(diskFirst.nodes.find((node) => node.id === "step-02").data.prompt, "# 磁盘旧内容");
+});
+
+test("generated step directories follow label changes while explicit document paths stay stable", async () => {
+  const { flow } = await fixture();
+  const previous = await writeFlowDocuments(flow);
+  const generatedBefore = previous.docs["step-01"];
+  const explicitBefore = "custom/review.md";
+  const changed = {
+    ...previous,
+    docs: { ...previous.docs, "step-02": explicitBefore },
+    nodes: previous.nodes.map((node) => node.id === "step-01"
+      ? { ...node, data: { ...node.data, label: "实现代码" } }
+      : node)
+  };
+  const normalized = normalizeDocumentFlow(changed, {
+    storageRoot: flow.docRoot,
+    scope: "session-a",
+    previousFlow: previous
+  });
+
+  assert.notEqual(normalized.docs["step-01"], generatedBefore);
+  assert.match(normalized.docs["step-01"], /实现代码/);
+  assert.equal(normalized.docs["step-02"], explicitBefore);
+});
+
+test("topological ties follow explicit order and canvas coordinates before array order", () => {
+  const flow = {
+    nodes: [
+      { id: "input", position: { x: 0, y: 0 }, data: {} },
+      { id: "lower", position: { x: 300, y: 300 }, data: {} },
+      { id: "right", position: { x: 500, y: 100 }, data: {} },
+      { id: "upper", position: { x: 300, y: 100 }, data: {} },
+      { id: "priority", position: { x: 900, y: 900 }, data: { order: 1 } },
+      { id: "output", position: { x: 1200, y: 0 }, data: {} }
+    ],
+    edges: [
+      ...["lower", "right", "upper", "priority"].map((target) => ({ source: "input", target })),
+      ...["lower", "right", "upper", "priority"].map((source) => ({ source, target: "output" }))
+    ]
+  };
+
+  assert.deepEqual(orderedNodeIds(flow), ["input", "priority", "upper", "lower", "right", "output"]);
+});
+
+test("flow_create can build a validated branch-shaped scaffold with stable step ids", () => {
+  const flow = createScaffoldFlow({
+    id: "branched",
+    steps: [
+      { id: "route", label: "是否通过", kind: "condition", data: { gateType: "ifElse" } },
+      { id: "yes", label: "通过处理" },
+      { id: "no", label: "失败处理" }
+    ],
+    connections: [
+      { source: "input", target: "route" },
+      { source: "route", target: "yes", branch: "true" },
+      { source: "route", target: "no", branch: "false" },
+      { source: "yes", target: "output" },
+      { source: "no", target: "output" }
+    ]
+  });
+
+  assert.deepEqual(flow.nodes.map((node) => node.id), ["input", "route", "yes", "no", "output"]);
+  assert.deepEqual(flow.edges.filter((edge) => edge.source === "route").map((edge) => edge.sourceHandle).sort(), ["false", "true"]);
+  assert.equal(flow.nodes.find((node) => node.id === "route").data.gateType, "ifElse");
+  assert.equal(flow.nodes.every((node) => Number.isFinite(node.position.x) && Number.isFinite(node.position.y)), true);
+});
+
+test("flow_create refuses to fake an aggregate gate with a linear single input", () => {
+  assert.throws(() => createScaffoldFlow({
+    id: "invalid-or",
+    steps: [{ id: "route", label: "任一通过", kind: "condition", data: { gateType: "or" } }]
+  }), /requires explicit connections from at least two upstream operands/);
+});
+
+test("generated WORKFLOW.md records executable gate formulas and input predicates", async () => {
+  const testRoot = join(process.cwd(), ".test-tmp");
+  await mkdir(testRoot, { recursive: true });
+  const root = await mkdtemp(join(testRoot, "deepseek-flow-logic-doc-"));
+  const flow = normalizeDocumentFlow(createScaffoldFlow({
+    id: "logic-doc",
+    name: "逻辑语义",
+    steps: [
+      { id: "route", label: "是否通过", kind: "condition", data: { gateType: "ifElse", predicate: "nonEmpty" } },
+      { id: "yes", label: "通过处理" },
+      { id: "no", label: "失败处理" }
+    ],
+    connections: [
+      { source: "input", target: "route" },
+      { source: "route", target: "yes", branch: "true" },
+      { source: "route", target: "no", branch: "false" },
+      { source: "yes", target: "output" },
+      { source: "no", target: "output" }
+    ]
+  }), { storageRoot: root, scope: "session-a" });
+  const written = await writeFlowDocuments(flow);
+  const workflow = await readFile(join(written.docRoot, "WORKFLOW.md"), "utf8");
+
+  assert.match(workflow, /## 逻辑门执行契约/);
+  assert.match(workflow, /`ifElse` · `A`/);
+  assert.match(workflow, /输入 \[nonEmpty\]/);
+  assert.match(workflow, /不得把 AND\/OR\/XOR 当成纯文字标签/);
+});
+
 test("editing workflowContent writes the same WORKFLOW.md", async () => {
   const { flow } = await fixture();
   const content = "# 自定义总流程\n\n1. 先试运行\n2. 再质检";

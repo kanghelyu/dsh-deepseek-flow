@@ -1,12 +1,29 @@
-// DeepSeekFlow client bundle 构建：优先使用 esbuild；离线交接环境没有 node_modules 时，
-// 直接把无 JSX、仅依赖宿主 React 的 entry.js 包装成 Harness Client bundle。
+// DeepSeekFlow client bundle builder.
+// Prefer esbuild, while keeping a deterministic dependency-free fallback for
+// offline plugin hand-offs where node_modules is intentionally absent.
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
+
+const CLIENT_ENTRY = "src/client/entry.js";
+const OFFLINE_MODULES = [
+  "lib/condition-gates.js",
+  "lib/logic-semantics.js",
+  "lib/topology-model.js",
+  "src/client/i18n.js",
+  "src/client/styles.js",
+  "src/client/graph-model.js",
+  "src/client/graph-canvas.js"
+];
+const REVISION_INPUTS = [...OFFLINE_MODULES, CLIENT_ENTRY, "package.json"];
+
+async function readSources(paths) {
+  return Promise.all(paths.map(async (path) => [path, await readFile(path, "utf8")]));
+}
 
 async function buildWithEsbuild() {
   const { build } = await import("esbuild");
   const result = await build({
-    entryPoints: ["src/client/entry.js"],
+    entryPoints: [CLIENT_ENTRY],
     bundle: true,
     format: "cjs",
     platform: "browser",
@@ -20,28 +37,26 @@ async function buildWithEsbuild() {
   return `window.__ModuleLoader__.load({ id: "deepseek-flow", factory: (require) => {\nvar module = { exports: {} }; var exports = module.exports;\n${code}\nreturn module.exports; } });\n`;
 }
 
-function transformEntry(source) {
+function stripModuleSyntax(source) {
   return source
-    .replace(/^import\s*\{[\s\S]*?\}\s*from "\.\.\/\.\.\/lib\/condition-gates\.js";\s*/m, "")
-    .replace(/^import React,\s*\{([^}]+)\}\s*from "react";\s*/m, (_match, names) => {
-      return `const import_react3 = require("react");\nconst React = import_react3.default ?? import_react3;\nconst {${names}} = import_react3;\n`;
-    })
-    .replace(/\nexport \{ apply, inject \};\s*$/m, "\n")
-    .replace(/\bReact\./g, "React.");
+    .replace(/^import[\s\S]*?;\s*/gm, "")
+    .replace(/^export\s+/gm, "");
 }
 
-function transformGateLogic(source) {
-  return source.replace(/^export\s+/gm, "");
+function transformEntry(source) {
+  const withHostReact = source.replace(
+    /^import React,\s*\{([^}]+)\}\s*from "react";\s*/m,
+    (_match, names) => `const import_react3 = require("react");\nconst React = import_react3.default ?? import_react3;\nconst {${names}} = import_react3;\n`
+  );
+  return stripModuleSyntax(withHostReact)
+    .replace(/\nexport \{ apply, inject \};\s*$/m, "\n");
 }
 
 async function buildOffline() {
-  const [entrySource, gateSource] = await Promise.all([
-    readFile("src/client/entry.js", "utf8"),
-    readFile("lib/condition-gates.js", "utf8")
-  ]);
-  const entry = transformEntry(entrySource);
-  const gateLogic = transformGateLogic(gateSource);
-  return `window.__ModuleLoader__.load({ id: "deepseek-flow", factory: (require) => {\nvar module = { exports: {} }; var exports = module.exports;\n${gateLogic}\n${entry}\nmodule.exports = { apply, inject };\nreturn module.exports; } });\n`;
+  const modules = await readSources(OFFLINE_MODULES);
+  const entry = transformEntry(await readFile(CLIENT_ENTRY, "utf8"));
+  const bundledModules = modules.map(([, source]) => stripModuleSyntax(source)).join("\n");
+  return `window.__ModuleLoader__.load({ id: "deepseek-flow", factory: (require) => {\nvar module = { exports: {} }; var exports = module.exports;\n${bundledModules}\n${entry}\nmodule.exports = { apply, inject };\nreturn module.exports; } });\n`;
 }
 
 let wrapped;
@@ -53,14 +68,10 @@ try {
   wrapped = await buildOffline();
   console.log("building client with dependency-free offline wrapper");
 }
-const [entrySource, packageSource] = await Promise.all([
-  readFile("src/client/entry.js", "utf8"),
-  readFile("package.json", "utf8")
-]);
+
+const revisionSources = await readSources(REVISION_INPUTS);
 const revision = createHash("sha256")
-  .update(entrySource)
-  .update("\0")
-  .update(packageSource)
+  .update(revisionSources.map(([path, source]) => `${path}\0${source}`).join("\0"))
   .digest("hex")
   .slice(0, 12);
 wrapped = wrapped.replace(/^(?:\/\* deepseek-flow client-rev:[a-f0-9]+ \*\/\n)+/, "");

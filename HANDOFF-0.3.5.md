@@ -2,7 +2,7 @@
 
 ## 产品边界
 
-DeepSeekFlow 只编辑流程图、`WORKFLOW.md` 与各步骤 `STEP.md`。它可以由用户手动调用当前 Session 派生的一次性 Agent 做逻辑校验和 Markdown 优化，但绝不运行工作流。真正执行始终留在 Session。
+DeepSeekFlow 编辑流程图、`WORKFLOW.md` 与各步骤 `STEP.md`，并可确定性计算逻辑门真值；它也可以由用户手动调用当前 Session 派生的一次性 Agent 做逻辑校验和 Markdown 优化，但不会执行 Agent 步骤或完整工作流。真正的步骤执行始终留在 Session。
 
 ## 本版必须保留的交互
 

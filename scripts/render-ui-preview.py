@@ -170,6 +170,19 @@ for i, (node_id, kind, label, wx, wy) in enumerate(graph_nodes):
     for px in (nx, nx + node_w):
         d.ellipse((px - port_r, cy - port_r, px + port_r, cy + port_r), fill=BRAND, outline=BG, width=max(1, int(2 * scale)))
 
+# Pending structural edits expose the explicit topology transaction control in
+# the canvas bottom-right corner. Markdown-only edits never show this control.
+apply_w, apply_h = 152, 42
+apply_x1, apply_y1 = cx + cw - 18, canvas_y + canvas_h - 18
+apply_x0, apply_y0 = apply_x1 - apply_w, apply_y1 - apply_h
+box(apply_x0 + 2, apply_y0 + 5, apply_x1 + 2, apply_y1 + 5, 12, SHADOW, SHADOW)
+box(apply_x0, apply_y0, apply_x1, apply_y1, 12, BRAND, BRAND)
+d.ellipse((apply_x0 + 12, apply_y0 + 11, apply_x0 + 32, apply_y0 + 31), fill=BRAND_SOFT)
+txt(apply_x0 + 22, apply_y0 + 21, "v", 10, ON_BRAND, True, anchor="mm")
+txt(apply_x0 + 42, apply_y0 + 13, "Apply changes", 9, ON_BRAND, True)
+box(apply_x1 - 29, apply_y0 + 11, apply_x1 - 9, apply_y0 + 31, 10, BRAND_SOFT, BRAND_SOFT)
+txt(apply_x1 - 19, apply_y0 + 21, "3", 8, ON_BRAND, True, anchor="mm")
+
 # Flow-box palette
 fy = canvas_y + canvas_h
 d.rectangle((cx, fy, cx + cw, H), fill=LAYER)
