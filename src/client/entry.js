@@ -1148,43 +1148,29 @@ function Studio({ connection, sessionId, language }) {
     return appliedWorkflowAssistRef.current.has(requestId);
   };
   const markWorkflowAssistApplied = (requestId) => {
-    if (appliedWorkflowAssistRef.current) appliedWorkflowAssistRef.current.add(requestId);
+    appliedWorkflowAssistRef.current ??= new Set();
+    appliedWorkflowAssistRef.current.add(requestId);
     try {
-      window.sessionStorage.setItem("deepseek-flow:applied-workflow-assists", JSON.stringify([...(appliedWorkflowAssistRef.current ?? [])]));
+      window.sessionStorage.setItem("deepseek-flow:applied-workflow-assists", JSON.stringify([...appliedWorkflowAssistRef.current]));
     } catch {
       // 会话存储不可用时仅失去切屏去重，不影响结果应用。
     }
   };
 
   const applyWorkflowOptimization = async (entry, { requestId, flow, sourceRevision, requireUnchangedRevision }) => {
-    if (entry.status === "cancelled") {
-      setMessage(t.assistantCancelled);
+    const stop = (message) => {
+      if (message) setMessage(message);
       activeAssistRef.current = null;
       setAssistantBusy(null);
-      return;
-    }
-    if (entry.status !== "done" || !entry.result) {
-      setMessage(t.assistantFailed + String(entry.error ?? ""));
-      activeAssistRef.current = null;
-      setAssistantBusy(null);
-      return;
-    }
+    };
+    if (entry.status === "cancelled") return stop(t.assistantCancelled);
+    if (entry.status !== "done" || !entry.result) return stop(t.assistantFailed + String(entry.error ?? ""));
     if (requestId && isWorkflowAssistApplied(requestId)) return;
     if (!flow) {
       flow = await waitForPersistedFlow();
-      if (!flow) {
-        setMessage(t.assistantFailed + "workflow unavailable");
-        activeAssistRef.current = null;
-        setAssistantBusy(null);
-        return;
-      }
+      if (!flow) return stop(t.assistantFailed);
     }
-    if (requireUnchangedRevision && documentRevisionRef.current !== sourceRevision) {
-      setMessage(t.workflowChangedDuringOptimization);
-      activeAssistRef.current = null;
-      setAssistantBusy(null);
-      return;
-    }
+    if (requireUnchangedRevision && documentRevisionRef.current !== sourceRevision) return stop(t.workflowChangedDuringOptimization);
     const result = entry.result;
     const optimized = new Map((result.documents ?? []).map((document) => [document.documentId, String(document.content ?? "")]));
     const optimizedFlow = {
@@ -1212,11 +1198,7 @@ function Studio({ connection, sessionId, language }) {
     persistedRevisionRef.current.set(saved.id, Number(saved.revision) || 0);
     setPersistedTopologySignature(topologySignature(saved));
     if (requestId) markWorkflowAssistApplied(requestId);
-    if (currentIdRef.current !== flowId) {
-      activeAssistRef.current = null;
-      setAssistantBusy(null);
-      return;
-    }
+    if (currentIdRef.current !== flowId) return stop();
     setFlows((items) => items.map((item) => item.id === saved.id ? { ...item, ...saved } : item));
     if (topologySignature(optimizedFlow) === topologySignature(saved)) {
       showFlow(saved, { resetDocument: false });
@@ -1227,9 +1209,7 @@ function Studio({ connection, sessionId, language }) {
       nodesRef.current = draftNodes;
       setDirty(true);
     }
-    setMessage(result.summary ? `${t.workflowOptimized}：${result.summary}` : t.workflowOptimized);
-    activeAssistRef.current = null;
-    setAssistantBusy(null);
+    stop(result.summary ? `${t.workflowOptimized}：${result.summary}` : t.workflowOptimized);
   };
 
   const runWorkflowOptimization = async () => {
