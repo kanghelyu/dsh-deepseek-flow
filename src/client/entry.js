@@ -208,7 +208,7 @@ function text(language) {
         docFile: "Doc file (relative to docRoot)",
         docSyncNote: "Prompt syncs back to: ",
         advancedHints: "Session hints (advanced)",
-        assistant: "AI document assistant",
+        assistant: "AI",
         assistModelLabel: "Model used by the AI assistant",
         assistModelFollow: "Follow session",
         assistEffortLabel: "Reasoning effort",
@@ -388,7 +388,7 @@ const styles = String.raw`
 .df-assistant__safe{font-size:9px;color:var(--df-ink-2);white-space:nowrap}
 .df-assistant__target{max-width:190px;padding:3px 8px;border:1px solid var(--df-border);border-radius:999px;color:var(--df-ink-2);font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .df-assist-menu-wrap{position:relative;display:flex;align-items:center;flex:none}
- .df-assist-menu-btn{display:inline-flex;align-items:center;gap:5px;max-width:170px;border:1px solid var(--df-border-strong);border-radius:999px;background:var(--df-layer-2);color:var(--df-ink);padding:3px 9px;font-size:10px;line-height:1.4;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .df-assist-menu-btn{display:inline-flex;align-items:center;gap:4px;max-width:150px;border:1px solid var(--df-border-strong);border-radius:999px;background:var(--df-layer-2);color:var(--df-ink);padding:2px 7px;font-size:9px;line-height:1.35;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .df-assist-menu-btn:hover{border-color:var(--df-brand)}
  .df-assist-menu-caret{font-size:8px;color:var(--df-ink-2);flex:none}
  .df-assist-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:40;min-width:230px;max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:6px;border:1px solid var(--df-border-strong);border-radius:14px;background:var(--df-layer);box-shadow:0 14px 36px color-mix(in srgb,var(--df-ink) 16%,transparent)}
