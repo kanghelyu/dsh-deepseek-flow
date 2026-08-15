@@ -36,6 +36,8 @@ export const styles = String.raw`
 .df-graph__label{fill:var(--df-ink);font-size:10px;font-weight:750;text-anchor:middle;dominant-baseline:middle;pointer-events:none}
 .df-graph__node{position:absolute;width:208px;height:116px;pointer-events:auto;cursor:grab}
 .df-graph__node.is-dragging{cursor:grabbing}
+.df-graph__node.is-connect-target{outline:2px solid var(--df-brand);outline-offset:3px;box-shadow:0 0 0 4px color-mix(in srgb,var(--df-brand) 14%,transparent),0 10px 28px color-mix(in srgb,var(--df-ink) 18%,transparent)}
+.df-graph__node.is-connect-target .df-graph__handle--target{transform:translateY(-50%) scale(1.25);background:var(--df-brand)}
 .df-graph__handle{position:absolute;z-index:4;top:50%;width:13px;height:13px;padding:0;border:2px solid var(--df-bg);border-radius:50%;background:var(--df-brand);transform:translateY(-50%);cursor:crosshair;box-shadow:0 0 0 1px color-mix(in srgb,var(--df-brand) 65%,var(--df-border-strong));transition:transform .14s ease,box-shadow .14s ease}
 .df-graph__handle:hover,.df-graph__handle:focus-visible{transform:translateY(-50%) scale(1.18);box-shadow:0 0 0 5px color-mix(in srgb,var(--df-brand) 18%,transparent);outline:0}
 .df-graph__handle--target{left:-6px}

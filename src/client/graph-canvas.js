@@ -25,6 +25,12 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
+// 连接目标命中：整个节点框都是可释放区域（松手位置只选目标，箭头仍吸附到左侧输入点）。
+function connectionTargetAt(clientX, clientY) {
+  const element = document.elementFromPoint(clientX, clientY);
+  return element?.closest?.("[data-df-connect-target-id]")?.getAttribute("data-df-connect-target-id") ?? null;
+}
+
 function graphEdgeGeometry(edge, byId) {
   const source = byId.get(edge.source);
   const target = byId.get(edge.target);
@@ -238,11 +244,14 @@ export function GraphCanvas({
     const sourceNode = byId.get(source);
     if (!sourceNode) return;
     const start = { x: sourceNode.position.x + GRAPH_NODE_WIDTH, y: sourceNode.position.y + GRAPH_NODE_HEIGHT / 2 };
-    setConnectionDraft({ source, start, end: start });
-    const move = (next) => setConnectionDraft((draft) => draft ? { ...draft, end: screenToWorld(next.clientX, next.clientY) } : null);
+    setConnectionDraft({ source, start, end: start, hoverTarget: null });
+    const move = (next) => setConnectionDraft((draft) => draft ? {
+      ...draft,
+      end: screenToWorld(next.clientX, next.clientY),
+      hoverTarget: connectionTargetAt(next.clientX, next.clientY)
+    } : null);
     const up = (next) => {
-      const targetElement = document.elementFromPoint(next.clientX, next.clientY)?.closest?.("[data-df-target-id]");
-      const target = targetElement?.getAttribute("data-df-target-id") ?? null;
+      const target = connectionTargetAt(next.clientX, next.clientY);
       const connection = { source, target, sourceHandle: null, targetHandle: null };
       if (target) {
         if (isValidConnection?.(connection) ?? true) onConnect?.(connection);
@@ -359,9 +368,10 @@ export function GraphCanvas({
       ),
       nodes.map((node) => React.createElement("div", {
         key: node.id,
-        className: `df-graph__node${draggingNode === node.id ? " is-dragging" : ""}`,
+        className: `df-graph__node${draggingNode === node.id ? " is-dragging" : ""}${connectionDraft?.hoverTarget === node.id ? " is-connect-target" : ""}`,
         style: { left: `${node.position.x}px`, top: `${node.position.y}px` },
         "data-node-id": node.id,
+        "data-df-connect-target-id": node.id,
         onPointerDown: (event) => beginNodeDrag(node, event),
         onClick: (event) => {
           event.stopPropagation();
