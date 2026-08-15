@@ -26,10 +26,10 @@ function flowFixture() {
 test("topology review prompt treats Markdown as immutable context and requests topology only", () => {
   const flow = flowFixture();
   const prompt = buildTopologyReviewPrompt(flow, flow, ["example issue"]);
-  assert.match(prompt, /当前主 Session 绑定/);
-  assert.match(prompt, /严禁返回或改写/);
+  assert.match(prompt, /bound to the current main Session/);
+  assert.match(prompt, /never return or rewrite it/);
   assert.match(prompt, /IMMUTABLE WORKFLOW/);
-  assert.match(prompt, /IF\/ELSE 与 NOT 恰好一个真值输入/);
+  assert.match(prompt, /IF\/ELSE and NOT take exactly one truth input/);
   assert.match(prompt, /example issue/);
   assert.deepEqual(TOPOLOGY_REVIEW_OUTPUT_SCHEMA.required, ["summary", "topology"]);
   assert.equal(TOPOLOGY_REVIEW_OUTPUT_SCHEMA.properties.topology.additionalProperties, false);
