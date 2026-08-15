@@ -1,104 +1,150 @@
 # DeepSeek Flow
 
-> Turn your agent workflow into a living diagram — one per session, synced with your docs, themed like your UI.
+> A Markdown-first visual workflow editor for DeepSeek Harness.
 
 **English** · [简体中文](README.zh-CN.md)
 
 [![GitHub release](https://img.shields.io/github/v/release/kanghelyu/dsh-deepseek-flow?label=release)](https://github.com/kanghelyu/dsh-deepseek-flow/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Say *"build a workflow"* — and the workflow appears as an editable diagram.**
+DeepSeek Flow turns a `WORKFLOW.md` and its step-level `STEP.md` files into an editable diagram inside DeepSeek Harness. The diagram and the Markdown stay synchronized, so you can work visually without giving up portable, reviewable files.
 
-Install this plugin and your Agent learns a built-in skill for it: whenever you say things like *"构建工作流"* / *"build a workflow"* / *"import a workflow"*, the workflow is scaffolded through this plugin — a `WORKFLOW.md` master doc, one `STEP.md` workspace per step, and a canvas with every node wired up — ready to view and edit in the **DeepSeek Flow** tab.
-
-DeepSeek Flow is a visual-workflow plugin for [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness). It turns the `WORKFLOW.md` + per-step `STEP.md` pattern you already use with Codex/Claude into a diagram you can edit: document rail on the left, canvas in the middle, Markdown editor on the right, AI assistant at the bottom.
-
-## ✨ Highlights
-
-| Instead of… | You get… |
-| --- | --- |
-| One global flow shared by every session | **Per-session isolation** — every session owns its workflow |
-| Diagram and docs drifting apart | **Two-way sync** — edit the canvas, the MD files update; edit the MD files, the canvas updates |
-| Drawing every step by hand | **One-sentence import** — tell the Agent "import a workflow", it scaffolds the docs and the canvas |
-| Benchmarks and bloat you never touch | Only three jobs: **edit flows · sync docs · AI review/optimize** |
-| Heavy third-party canvas libraries | **Hand-rolled SVG edge layer + HTML node layer** — no @xyflow, ~120 KB bundle |
-| Hard-coded colors that clash with your UI | Harness theme tokens — **follows your WebUI light/dark theme automatically** |
-| Chinese-only or English-only UI | **UI language follows your WebUI locale automatically** (中文/English) |
-| Saying "make me a workflow" does nothing | **One-sentence workflow building** — a built-in skill turns that phrase into a diagram + docs |
-
-**Built-in AI assistant** (manual, one-shot): logic validation and single-doc / whole-flow optimization with explicit **accept/reject** — nothing is written until you accept. Jobs run in an **isolated session**, so switching views or sessions never interrupts them, and results are waiting when you come back. Model and reasoning effort are selectable in the UI.
-
-**Platform:** the UI is currently optimized for **Web UI**. Host logic is UI-agnostic, so other UIs (TUI, etc.) should work but are not specially adapted — PRs welcome.
-
-## 📸 Screenshots
-
-Same flow, same build — only the WebUI theme was toggled; the plugin follows automatically.
+It is intentionally an editor—not a workflow runtime. DeepSeek Flow helps you design, inspect, and improve a workflow; execution remains in the current Session.
 
 <p align="center">
-  <img src="docs/images/light.png" width="49%" alt="Light theme">
-  <img src="docs/images/dark.png" width="49%" alt="Dark theme">
+  <img src="docs/images/dark.png" width="49%" alt="DeepSeek Flow in dark mode">
+  <img src="docs/images/light.png" width="49%" alt="DeepSeek Flow in light mode">
 </p>
 
-## 🚀 Quick Start
+## What it gives you
+
+- **Markdown as the source of truth** — one master `WORKFLOW.md`, plus one `STEP.md` workspace for each step.
+- **A real visual editor** — create, move, connect, reconnect, label, and delete nodes and arrows.
+- **Two-way synchronization** — edits made on the canvas and in the Markdown editor are written back to the workflow files.
+- **Per-session isolation** — each Harness session keeps its own workflows, with optional shared templates.
+- **Comfortable large-flow navigation** — collapsible and resizable side panels, pan and zoom, fit-to-view, animated node focus, and independent scrolling regions.
+- **Native theme support** — the interface follows Harness light and dark themes and the active WebUI language.
+- **Manual AI assistance** — run logic validation, optimize one document with review, or optimize the complete workflow.
+- **Background AI jobs** — switching documents, views, or sessions does not interrupt accepted jobs; document proposals are restored when you return.
+
+## Quick start
+
+Install from GitHub into the Web profile:
 
 ```bash
 dsh plugin --profile web add "github:kanghelyu/dsh-deepseek-flow#main"
 ```
 
-Restart `dsh web` — done. Pure git source, build artifacts committed, all dependencies from the registry, and the bundle layer mounts automatically. Verified end-to-end on a clean profile.
+Restart `dsh web`, open a session, and select the **DeepSeek Flow** tab.
 
-Verify:
+To confirm that the plugin is mounted:
 
 ```bash
 dsh web --dump-config | grep deepseek-flow
 ```
 
-### Usage
+## Your first workflow
 
-1. Open any session → **DeepSeek Flow** tab.
-2. Say *"import a workflow"* — the Agent scaffolds `WORKFLOW.md` + per-step `STEP.md` + canvas.
-3. Drag nodes, draw arrows, edit prompts — saving writes back to the MD files.
-4. Use the **AI doc assistant** for logic validation and optimization.
-5. Switch away anytime — jobs keep running and results are there when you return.
+1. In a Session, ask the Agent to **build a workflow** or **import a workflow**.
+2. Open **DeepSeek Flow**. The plugin scaffolds a master document, step documents, and their visual layout.
+3. Select a document to edit its Markdown, or drag a node's output handle onto another node to create an arrow.
+4. Save your changes. The canvas model and Markdown files remain synchronized.
+5. Return to the Session when you want the Agent to execute the workflow.
 
-### Development
+A typical workflow directory looks like this:
 
-```bash
-dsh plugin --profile web add link:/path/to/deepseek-flow   # local source
-node --test test/*.test.mjs                                 # 31/31
-node scripts/build.mjs                                      # rebuild client bundle
-bash scripts/ensure-deps.sh                                 # dependency fallback for broken envs
+```text
+my-workflow/
+├── WORKFLOW.md
+├── flow.json
+└── steps/
+    ├── research/
+    │   └── STEP.md
+    ├── draft/
+    │   └── STEP.md
+    └── quality-check/
+        └── STEP.md
 ```
 
-### Uninstall
+## AI document assistant
+
+Every AI action is started manually. DeepSeek Flow never runs validation or optimization behind your back.
+
+| Action | Scope | What happens before files change |
+| --- | --- | --- |
+| **Logic validation** | All workflow documents and arrow relationships | The Agent returns clickable errors and warnings; no file is changed. |
+| **Optimize current document** | The selected `WORKFLOW.md` or `STEP.md` only | A complete proposal appears in the preview. You must **Accept** or **Reject** it. |
+| **Optimize entire workflow** | `WORKFLOW.md` and every `STEP.md` | A warning is shown first. After confirmation, the Agent rewrites and saves the complete set directly. There is no per-document review or built-in undo. |
+
+For whole-workflow optimization, commit or back up important Markdown files first. If a document changes while an optimization is running, DeepSeek Flow refuses to overwrite the newer content.
+
+The assistant uses an isolated Agent job and does not run the workflow. Model and reasoning-effort controls are available in the assistant menu.
+
+## Design boundaries
+
+DeepSeek Flow deliberately does **not** provide:
+
+- a workflow execution button or runtime;
+- API-key, provider, or credential management;
+- triggers, schedules, webhooks, or execution history;
+- a replacement for normal Session interaction.
+
+That boundary keeps the plugin focused: edit and validate in DeepSeek Flow, execute in the Session.
+
+## Local development
+
+Clone the repository and link it into your Web profile:
+
+```bash
+git clone https://github.com/kanghelyu/dsh-deepseek-flow.git
+cd dsh-deepseek-flow
+dsh plugin --profile web add "link:$PWD"
+```
+
+Useful checks:
+
+```bash
+npm test
+npm run build
+npm run smoke
+```
+
+If an older local Harness installation is missing linked dependencies, stop `dsh web` before running:
+
+```bash
+bash scripts/ensure-deps.sh
+```
+
+After changing client code, rebuild and hard-refresh the browser. Host changes require restarting `dsh web`.
+
+<details>
+<summary>Repository layout</summary>
+
+```text
+deepseek-flow/
+├── lib/                 Host code and committed client bundle
+├── src/client/          WebUI client source
+├── scripts/             Build, dependency, screenshot, and smoke checks
+├── test/                Contract and regression tests
+├── examples/            Example Markdown workflow
+└── docs/images/         README screenshots
+```
+
+</details>
+
+## Troubleshooting
+
+- **The tab does not appear:** verify the plugin with `dsh web --dump-config`, then restart the Web profile.
+- **The UI looks stale:** rebuild with `npm run build`, restart when Host code changed, and hard-refresh the browser.
+- **AI actions report no provider:** select a working model in the Session or in the assistant menu.
+- **Whole-workflow optimization is rejected:** one or more documents changed while the Agent was working, or the Agent did not return every required document. Retry from the latest files.
+
+## Uninstall
 
 ```bash
 dsh plugin --profile web remove deepseek-flow
 ```
 
-## 🧠 Architecture
-
-```
-deepseek-flow/
-├── lib/index.js                  Host — per-session storage, remote CRUD, tools, assist orchestration
-├── lib/agent-assistant.js        AI review/optimize — prompts, schemas, isolated-session jobs
-├── lib/typert.descriptors.js     Typert wire parameter whitelist
-├── lib/client.js                 Client bundle (committed build artifact)
-├── src/client/entry.js           Client source — five-column layout, hand-rolled canvas, assistant
-├── scripts/                      build / ensure-deps / ui-shot (Playwright assertions) / smoke
-├── test/                         31 contract tests
-└── cordis.patch.yml              plugin row (dataDir, optional assistantModel / assistantTimeoutMs)
-```
-
-### Key mechanics
-
-- **Storage** — `~/.dsh/deepseek-flow/shared.json` + `sessions/<sessionId>.json`; files are the source of truth.
-- **Doc-driven** — `flow.workflowDoc` + `flow.docs` (nodeId → relative `STEP.md`); reads overlay file content onto node prompts, saves write back.
-- **Session isolation** — tools read `exec.agent.id ?? agent.session?.id`; lists merge own session + shared templates (dedup, session copy wins).
-- **AI jobs** — `dflow/assist` accepts and returns immediately; work runs in an **isolated session** via `agents.create` (`meta: { agentPreset: "standard", cwd }` — `cwd` is required or the subagent fails silently); results are cached by `sessionId:requestId` (TTL 30 min); the client polls `dflow/assistHistory` every 3 s.
-- **Model routing** — follows `agentDefaultModel.currentSelection()`; overridable via `assistantModel` config or the UI; `reasoningEffort` supports `off` / `high` / `max`.
-- **Regression baselines** — arrows `fill:none!important` + closed markers; `GRAPH_MIN_ZOOM = 0.5`; canvas structural CSS is append-only; colors use `--dsw-alias-*` tokens only.
-
 ## License
 
-[MIT](LICENSE) · Community project, not affiliated with DeepSeek.
+[MIT](LICENSE). Community project; not affiliated with DeepSeek.
