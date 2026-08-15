@@ -352,8 +352,7 @@ const styles = String.raw`
 .df-docitem__label{display:block;font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .df-docitem__path{display:block;font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--df-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .df-inspector{min-width:0;width:auto;height:100%;max-height:100%;display:flex;flex-direction:column;background:var(--df-layer);overflow:hidden;min-height:0}
- .df-inspector__scroll{flex:1 1 0;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:15px;display:flex;flex-direction:column;gap:11px;scrollbar-width:none}
- .df-inspector__scroll::-webkit-scrollbar{display:none}
+ .df-inspector__scroll{flex:1 1 0;height:0;min-height:0;overflow:auto;overscroll-behavior:contain;padding:15px;display:flex;flex-direction:column;gap:11px;scrollbar-width:thin}
  .df-inspector__scroll>*{flex-shrink:0}
  .df-inspector>*{flex-shrink:0}
 .df-inspector.is-collapsed{visibility:hidden;pointer-events:none;padding:0}
@@ -361,7 +360,7 @@ const styles = String.raw`
 .df-inspector label{display:grid;gap:4px;color:var(--df-ink-2);font-size:12px}
 .df-inspector input,.df-inspector select,.df-inspector textarea{width:100%;border:1px solid var(--df-border-strong);border-radius:7px;background:var(--df-layer-2);color:var(--df-ink);padding:6px 8px;outline:0}
 .df-inspector textarea{min-height:92px;resize:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55}
-.df-inspector textarea.df-markdown-editor{min-height:300px;max-height:60vh;resize:none;background:var(--df-bg);border-radius:10px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.df-inspector textarea.df-markdown-editor{min-height:300px;max-height:60vh;resize:none;background:var(--df-bg);border-radius:10px;overflow-y:auto;scrollbar-width:thin}
 .df-advanced{border:1px solid var(--df-border);border-radius:9px;background:var(--df-layer-2);padding:0 9px}
 .df-advanced summary{cursor:pointer;padding:8px 0;color:var(--df-ink-2);font-size:11px;font-weight:650}
 .df-advanced__content{display:grid;gap:9px;padding:0 0 10px}
