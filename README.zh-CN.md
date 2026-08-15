@@ -1,6 +1,6 @@
 <h1 align="center">DeepSeek Flow</h1>
 
-<p align="center"><strong>看清流程，审查拓扑，让画布与 Markdown 始终一致。</strong></p>
+<p align="center"><strong>看清流程，保留可移植 Markdown，只审查真正的画布修改。</strong></p>
 
 <p align="center">专为 DeepSeek Harness Web UI 打造的 Markdown 优先可视化工作流编辑器。</p>
 
@@ -15,7 +15,7 @@
 
 <p align="center"><a href="README.md">English</a> · <strong>简体中文</strong></p>
 
-DeepSeek Flow 把一份 `WORKFLOW.md` 和各步骤的 `STEP.md` 变成 DeepSeek Harness 里的可编辑流程图。画布与 Markdown 始终同步，让你既能直观地组织流程，也能继续使用可移植、可审阅的普通文件。
+DeepSeek Flow 把一份 `WORKFLOW.md` 和各步骤的 `STEP.md` 变成 DeepSeek Harness 里的可编辑流程图。内置 Skill 让当前 Session 能通过工具创建和维护工作流，同时保持画布、Markdown 双向同步和文件可移植性。
 
 它刻意只做编辑器，不做工作流运行器。你可以在 DeepSeek Flow 里设计、检查和优化工作流；真正执行仍然发生在当前 Session。
 
@@ -29,13 +29,14 @@ DeepSeek Flow 把一份 `WORKFLOW.md` 和各步骤的 `STEP.md` 变成 DeepSeek 
 - **Markdown 是唯一事实来源**——一份总控 `WORKFLOW.md`，每个步骤拥有独立的 `STEP.md` 工作区。
 - **真正可编辑的流程图**——新建、移动、连接、重连、标注和删除流程框与箭头。
 - **双向同步**——在画布和 Markdown 编辑器中的修改都会写回工作流文件。
-- **拓扑事务审查**——结构修改先保留为草稿，只有通过当前 Session Agent 审查后才整体落盘。
+- **区分来源的拓扑事务**——用户在画布上的结构修改走完整的当前 Session 审查；主 Session 直接修改文件产生的拓扑可走不可见的确定性定稿通道，不再把同一修改发回原 Session。
 - **可计算逻辑语义**——导出契约包含公式、操作数、谓词和确定性布尔结果，无需运行 Agent 步骤。
 - **按会话隔离**——每个 Harness Session 保存自己的工作流，同时可使用共享模板。
 - **适合大型流程的导航**——左右栏可收起和拖动缩放，支持画布平移、缩放、显示全图、缓动定位与独立滚动区域。
 - **原生主题适配**——自动跟随 Harness 明暗主题和 WebUI 界面语言。
 - **手动 AI 辅助**——逻辑校验、单文档优化和整工作流优化都由用户主动触发。
 - **后台 AI 任务**——切换文档、视图或会话不会中断已受理任务；回来后仍能看到对应文档的结果。
+- **内置 Agent Skill**——随插件安装，说明全部工作流工具，并提供可直接执行的 IF/ELSE 与布尔门示例。
 
 ## 快速开始
 
@@ -55,11 +56,11 @@ dsh web --dump-config | grep deepseek-flow
 
 ## 创建第一份工作流
 
-1. 在 Session 中告诉 Agent「构建工作流」或「导入工作流」。
+1. 在 Session 中告诉 Agent「构建工作流」或「导入工作流」。内置 `deepseek-flow` Skill 会引导它使用 `flow_create` 或 `flow_put`。
 2. 打开 **DeepSeek Flow**，插件会生成总控文档、步骤文档和对应画布。
-3. 选择文档编辑 Markdown；也可以把节点右侧的输出端点拖到另一个流程框上，直接创建箭头。
-4. 修改节点或箭头后点击**应用修改**。DeepSeek Flow 会先校验图，再让当前 Session Agent 审查，二次校验通过后原子保存一个新 revision。
-5. Markdown 修改继续走独立自动保存通道，不受拓扑事务影响。
+3. 可以继续让 Session Agent 修改工作流文件，也可以选择文档直接编辑 Markdown。
+4. 主 Session 或外部文件驱动的拓扑修改不会再次交给主 Session 审查。Agent 应调用 `flow_finalize_canvas`；即使它忘记调用，Studio 也会发现本次变化没有经过画布编辑事件，并自动按下同一个不可见定稿动作。
+5. 当**你自己**在画布里新增、删除、改名或连接流程框时，点击**应用修改**。DeepSeek Flow 会校验图、交给当前 Session Agent 审查、二次校验并原子保存新 revision。
 6. 需要真正执行工作流时，返回 Session 交给 Agent 处理。
 
 典型的工作流目录如下：
@@ -67,15 +68,28 @@ dsh web --dump-config | grep deepseek-flow
 ```text
 my-workflow/
 ├── WORKFLOW.md
-├── flow.json
-└── steps/
-    ├── research/
-    │   └── STEP.md
-    ├── draft/
-    │   └── STEP.md
-    └── quality-check/
-        └── STEP.md
+├── 01-input/
+│   └── STEP.md
+├── 02-research/
+│   └── STEP.md
+├── 03-quality-check/
+│   └── STEP.md
+└── 04-output/
+    └── STEP.md
 ```
+
+## Agent 工具
+
+| 工具 | 用途 |
+| --- | --- |
+| `flow_create` | 创建线性或分支工作流、生成文档并保存到当前 Session。 |
+| `flow_list` / `flow_read` | 查找工作流，读取总控文档、步骤文档、revision、拓扑和逻辑契约。 |
+| `flow_put` | 导入或原子更新完整 flow 定义；调用成功即代表已经持久化。 |
+| `flow_evaluate` | 根据上游值计算布尔门，不运行任何 Agent 步骤。 |
+| `flow_finalize_canvas` | Agent 直接改文件后，排队触发 Studio 的不可见确定性定稿动作，跳过主 Session 重复审核。 |
+| `flow_delete` | 删除 Session 工作流或共享模板；托管工作区会移入回收区。 |
+
+Harness 的 `skills` 服务就绪后，插件会响应式注册 Skill。包内 `SKILL.md` 的 frontmatter 后保留真实 Markdown 正文，因此文件系统和运行时 provider 都不会再返回空指令。
 
 ## 条件框与逻辑门
 
@@ -93,9 +107,19 @@ my-workflow/
 
 `flow_evaluate` 工具可根据上游步骤结果确定性计算门状态和激活目标；它不会运行 Agent 步骤，也不会产生工作流副作用。
 
+门谓词刻意限制为三个确定性值：`truthy`、`falsy`、`nonEmpty`。不要在 `predicate` 中填写“用户已经确认”之类自然语言规则。应先增加一个上游 Agent 步骤，让它输出 JSON 布尔值 `true` 或 `false`，再连接到使用 `predicate: "truthy"` 的条件框。
+
+```json
+{
+  "id": "confirmed",
+  "kind": "condition",
+  "data": { "label": "是否已确认", "gateType": "ifElse", "predicate": "truthy" }
+}
+```
+
 ## 拓扑提交事务
 
-新增或删除流程框、逻辑门、箭头、输入、输出，只会形成**本地拓扑草稿**。持久化必须完成一次显式事务：
+在 Studio 中新增或删除流程框、逻辑门、箭头、输入、输出，只会形成用户自己的本地拓扑草稿。持久化该草稿必须完成一次显式事务：
 
 ```text
 本地校验 → 当前 Session Agent 审查 → 二次校验 → revision 原子保存
@@ -107,6 +131,14 @@ my-workflow/
 - 只移动流程框属于布局变化，会自动保存，不会开启拓扑事务。
 - 拓扑草稿未提交时，逻辑校验和整工作流优化保持禁用；单文档编辑与优化仍可使用。
 - 删除托管工作流或生成的步骤目录时会移入回收区；外部自定义文档根目录绝不会自动移动。
+
+主 Session 直接修改文件时走另一条可信路径：
+
+```text
+Session 修改文件 → 可选 flow_finalize_canvas 信号 → 确定性校验 → 原子保存
+```
+
+定稿控件真实存在于 Studio 中，但被隐藏，普通界面无法点击。Studio 会记录每一个用户拓扑编辑处理器；如果出现拓扑差异，却没有发生任何画布编辑事件，就把它视为外部文件修改并自动按下隐藏定稿动作。若确定性校验失败，草稿会保留，普通的**应用修改**流程仍然可用。因此即使 Agent 忘记调用工具，也不会完全依赖它是否“听话”。
 
 ## AI 文档助手
 
@@ -168,6 +200,7 @@ bash scripts/ensure-deps.sh
 deepseek-flow/
 ├── lib/                 Host、拓扑事务、逻辑语义与已提交的 Client bundle
 ├── src/client/          WebUI Client 源码
+├── skills/              内置 DeepSeek Flow Agent Skill
 ├── scripts/             构建、依赖、截图与冒烟检查
 ├── test/                契约与回归测试
 ├── examples/            Markdown 工作流示例
@@ -176,7 +209,7 @@ deepseek-flow/
 
 </details>
 
-当前质量保障包含 75 项自动化契约与行为测试，覆盖图转换、revision 锁、文档生命周期、拓扑审查、布尔语义、连线校验、Agent 任务与生成后的 Client bundle。更多信息见[代码质量说明](CODE-QUALITY.md)和[质检报告](QA-REPORT.md)。
+当前质量保障包含 80 项自动化契约与行为测试，覆盖图转换、revision 锁、文档生命周期、拓扑审查、隐藏定稿、布尔语义、连线校验、Agent 任务与生成后的 Client bundle。更多信息见[代码质量说明](CODE-QUALITY.md)和[质检报告](QA-REPORT.md)。
 
 ## 常见问题
 
@@ -185,6 +218,8 @@ deepseek-flow/
 - **AI 操作提示没有可用 provider：**先在 Session 或助手菜单中选择可用模型。
 - **整工作流优化被拒绝写入：**通常是 Agent 工作期间原文发生变化，或 Agent 没有返回全部必需文档。请基于最新文件重试。
 - **应用修改被拒绝：**按提示修复环路、缺失输入、分支上限或过期 revision，再提交完整拓扑。
+- **Session 改完文件后仍短暂出现“应用修改”：**等待 Studio 的文件来源兜底判定，或让 Agent 使用工作流 id 和当前 revision 调用 `flow_finalize_canvas`。
+- **Skill 工具返回空正文：**更新插件并重启 `dsh web`；当前版本已内置合法的 `skills/deepseek-flow/SKILL.md`，并会在 `skills` 服务就绪后注册。
 
 ## 卸载
 
