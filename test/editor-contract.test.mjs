@@ -16,6 +16,7 @@ const build = await readFile(new URL("../scripts/build.mjs", import.meta.url), "
 const ensureDeps = await readFile(new URL("../scripts/ensure-deps.sh", import.meta.url), "utf8");
 const workspaceConfig = await readFile(new URL("../pnpm-workspace.yaml", import.meta.url), "utf8");
 const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+const bundledSkill = await readFile(new URL("../skills/deepseek-flow/SKILL.md", import.meta.url), "utf8");
 
 test("both side panels resize from their edges and collapse below a threshold", () => {
   assert.match(client, /documentsOpen/);
@@ -273,7 +274,23 @@ test("topology edits require an explicit bottom-right main-Session review before
   assert.match(host, /runMainSessionTopologyReview/);
   assert.match(host, /topologySignature\(latestBase\) !== topologySignature\(baseTopology\)/);
   assert.match(host, /validateFlow\(rebuilt\)/);
+  assert.match(host, /alreadyPersisted/);
+  assert.match(client, /topologySyncDecision/);
+  assert.match(client, /topologyAlreadyPersisted/);
   assert.match(descriptors, /"topologyApply"/);
+});
+
+test("bundled skill always has a real body and teaches executable gate JSON", () => {
+  const body = bundledSkill.replace(/^---\n[\s\S]*?\n---\n/, "").trim();
+  assert.ok(body.length > 500);
+  assert.match(body, /"predicate": "truthy"/);
+  assert.match(body, /"branch": "true"/);
+  assert.match(body, /"branch": "false"/);
+  assert.match(body, /不要再要求用户去画布点“应用修改”/);
+  assert.ok(manifest.files.includes("skills"));
+  assert.match(host, /ctx\.inject\(\["skills"\]/);
+  assert.match(host, /bundledSkillContent/);
+  assert.doesNotMatch(host, /const skills = ctx\.get\("skills"\)/);
 });
 
 test("dependency repair prefers registry packages, falls back to DSH, and refuses live-web mutation", () => {

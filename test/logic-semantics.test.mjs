@@ -58,6 +58,15 @@ test("predicates deterministically coerce upstream step results", () => {
   assert.equal(evaluatePredicate({ ok: true }, "nonEmpty"), true);
 });
 
+test("invalid natural-language predicates explain the Boolean normalization contract", () => {
+  const flow = aggregateFlow();
+  flow.nodes.find((node) => node.id === "all").data.predicate = "用户明确确认";
+  assert.throws(
+    () => evaluateFlowLogic(flow, { a: true, b: true }),
+    /use truthy, falsy, or nonEmpty[\s\S]*upstream Agent/
+  );
+});
+
 test("each incoming source can override the condition's default predicate", () => {
   const flow = aggregateFlow();
   flow.nodes.find((node) => node.id === "all").data.inputPredicates = { b: "falsy" };

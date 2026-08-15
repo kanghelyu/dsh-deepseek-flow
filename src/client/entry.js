@@ -14,7 +14,8 @@ import {
   mergeDocumentEdits,
   topologyDiff,
   topologyProjection,
-  topologySignature
+  topologySignature,
+  topologySyncDecision
 } from "../../lib/topology-model.js";
 import { GraphCanvas, GRAPH_MIN_ZOOM } from "./graph-canvas.js";
 import { browserLanguage, localeLanguage, text } from "./i18n.js";
@@ -559,6 +560,60 @@ function Studio({ connection, sessionId, language }) {
       }, currentDraftFlow)
     : null;
   const selectedNode = nodes.find((n) => n.id === selected) ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    let refreshing = false;
+    const refreshPersistedFlow = async () => {
+      if (refreshing || topologyApplyBusy || documentTimerRef.current) return;
+      const flowId = currentIdRef.current;
+      const baseFlow = persistedFlowRef.current;
+      if (!flowId || !baseFlow) return;
+      refreshing = true;
+      try {
+        const items = await remoteCall(connection, "dflow/list", { sessionId });
+        if (cancelled || !Array.isArray(items)) return;
+        const remoteFlow = items.find((item) => item.id === flowId);
+        if (!remoteFlow) return;
+        const knownRevision = persistedRevisionRef.current.get(flowId) ?? 0;
+        if ((Number(remoteFlow.revision) || 0) <= knownRevision) return;
+        const draftFlow = serializeFlow(baseFlow, nodesRef.current, edgesRef.current);
+        const decision = topologySyncDecision(baseFlow, draftFlow, remoteFlow);
+        if (decision === "conflict") {
+          setMessage(t.topologySessionConflict);
+          return;
+        }
+        setFlows(items);
+        if (decision === "documents-only") {
+          persistedFlowRef.current = remoteFlow;
+          persistedRevisionRef.current.set(flowId, Number(remoteFlow.revision) || 0);
+          setPersistedTopologySignature(topologySignature(remoteFlow));
+          return;
+        }
+        showFlow(remoteFlow, { resetDocument: false });
+        setDirty(false);
+        setMessage(decision === "already-persisted" ? t.topologyAlreadyPersisted : t.topologySessionSynced);
+      } catch {
+        // Background synchronization is opportunistic; normal load/apply paths
+        // keep their explicit error handling.
+      } finally {
+        refreshing = false;
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refreshPersistedFlow();
+    };
+    const timer = window.setInterval(refreshPersistedFlow, 5000);
+    window.addEventListener("focus", refreshPersistedFlow);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshPersistedFlow);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [connection, sessionId, showFlow, t.topologyAlreadyPersisted, t.topologySessionConflict, t.topologySessionSynced, topologyApplyBusy]);
+
   const selectedConditionInputs = selectedNode?.data?.kind === "condition"
     ? edges
         .filter((edge) => edge.target === selectedNode.id)
@@ -972,6 +1027,27 @@ function Studio({ connection, sessionId, language }) {
     setMessage(t.topologyApplying);
     const requestId = newRequestId();
     try {
+      // Reconcile a main-Session write before touching Markdown or opening an
+      // Agent review. This also closes the short window before background sync.
+      const latestItems = await remoteCall(connection, "dflow/list", { sessionId });
+      const latestFlow = (Array.isArray(latestItems) ? latestItems : []).find((item) => item.id === currentFlow.id);
+      const localBase = persistedFlowRef.current;
+      if (latestFlow && localBase && (Number(latestFlow.revision) || 0) > (persistedRevisionRef.current.get(currentFlow.id) ?? 0)) {
+        const liveDraft = serializeFlow(localBase, nodesRef.current, edgesRef.current);
+        const decision = topologySyncDecision(localBase, liveDraft, latestFlow);
+        if (decision === "conflict") throw new Error(t.topologySessionConflict);
+        setFlows(latestItems);
+        if (decision === "already-persisted" || decision === "remote-advanced-clean") {
+          showFlow(latestFlow, { resetDocument: false });
+          setTopologyApplyBusy(false);
+          setDirty(false);
+          setMessage(decision === "already-persisted" ? t.topologyAlreadyPersisted : t.topologySessionSynced);
+          return;
+        }
+        persistedFlowRef.current = latestFlow;
+        persistedRevisionRef.current.set(latestFlow.id, Number(latestFlow.revision) || 0);
+        setPersistedTopologySignature(topologySignature(latestFlow));
+      }
       if (documentTimerRef.current) clearTimeout(documentTimerRef.current);
       documentTimerRef.current = null;
       // Commit only existing Markdown first. Its payload is merged onto the
@@ -1002,8 +1078,15 @@ function Studio({ connection, sessionId, language }) {
       });
       if (!accepted?.accepted) {
         setTopologyApplyBusy(false);
+        if (accepted?.flow) {
+          const saved = accepted.flow;
+          setFlows((items) => items.some((item) => item.id === saved.id)
+            ? items.map((item) => item.id === saved.id ? { ...item, ...saved } : item)
+            : [saved, ...items]);
+          showFlow(saved, { resetDocument: false });
+        }
         setDirty(false);
-        setMessage(t.topologyNoChanges);
+        setMessage(accepted?.alreadyPersisted ? t.topologyAlreadyPersisted : t.topologyNoChanges);
         return;
       }
       topologyPollRef.current?.();

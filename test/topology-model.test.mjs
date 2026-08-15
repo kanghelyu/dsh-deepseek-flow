@@ -5,7 +5,8 @@ import {
   mergeDocumentEdits,
   topologyDiff,
   topologyProjection,
-  topologySignature
+  topologySignature,
+  topologySyncDecision
 } from "../lib/topology-model.js";
 
 function flowFixture() {
@@ -83,4 +84,24 @@ test("reviewed topology preserves latest existing Markdown and initializes new b
   assert.equal(rebuilt.nodes.find((node) => node.id === "output").data.instructions, "# Latest output edit");
   assert.equal(rebuilt.nodes.find((node) => node.id === "check").data.prompt, "# Draft check");
   assert.deepEqual(rebuilt.edges.map((edge) => edge.id), ["e1", "e2"]);
+});
+
+test("Session-saved topology is adopted without a redundant canvas review", () => {
+  const base = flowFixture();
+  const remote = structuredClone(base);
+  remote.revision = 5;
+  remote.nodes[1].data.label = "Main Session update";
+  const matchingDraft = structuredClone(remote);
+  matchingDraft.revision = 4;
+  assert.equal(topologySyncDecision(base, matchingDraft, remote), "already-persisted");
+  assert.equal(topologySyncDecision(base, base, remote), "remote-advanced-clean");
+
+  const localDraft = structuredClone(base);
+  localDraft.nodes[0].data.label = "Local canvas update";
+  assert.equal(topologySyncDecision(base, localDraft, remote), "conflict");
+
+  const documentOnly = structuredClone(base);
+  documentOnly.revision = 6;
+  documentOnly.workflowContent = "# New Markdown";
+  assert.equal(topologySyncDecision(base, localDraft, documentOnly), "documents-only");
 });
