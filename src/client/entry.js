@@ -352,6 +352,7 @@ const styles = String.raw`
 .df-docitem__label{display:block;font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .df-docitem__path{display:block;font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--df-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .df-inspector{min-width:0;width:auto;height:100%;max-height:100%;display:flex;flex-direction:column;gap:11px;padding:15px;background:var(--df-layer);overflow-y:auto;min-height:0;overscroll-behavior:contain;scrollbar-width:thin}
+ .df-inspector>*{flex-shrink:0}
 .df-inspector.is-collapsed{visibility:hidden;pointer-events:none;padding:0}
 .df-inspector h3{margin:0;font-size:14px;color:var(--df-ink)}
 .df-inspector label{display:grid;gap:4px;color:var(--df-ink-2);font-size:12px}
