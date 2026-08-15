@@ -4,6 +4,8 @@
 
 <p align="center">专为 DeepSeek Harness Web UI 打造的 Markdown 优先可视化工作流编辑器。</p>
 
+<p align="center"><a href="https://deepseekflow.kanghelyu.org/">🌐 官方网站 — deepseekflow.kanghelyu.org</a></p>
+
 <p align="center">
   <a href="https://www.npmjs.com/package/deepseek-flow"><img alt="npm 版本" src="https://img.shields.io/npm/v/deepseek-flow?style=flat-square&amp;logo=npm&amp;logoColor=white&amp;color=CB3837"></a>
   <a href="https://github.com/kanghelyu/dsh-deepseek-flow/releases"><img alt="GitHub release" src="https://img.shields.io/github/v/release/kanghelyu/dsh-deepseek-flow?style=flat-square&amp;logo=github&amp;label=release"></a>
