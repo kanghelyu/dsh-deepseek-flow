@@ -441,6 +441,23 @@ function Studio({ connection, sessionId, language }) {
               showFlow(entry.result.flow, { resetDocument: false });
               setDirty(false);
             }
+          } else if (entry.mode === "optimize-workflow" && entry.status === "running") {
+            // 整体优化仍在运行：恢复运行态并继续轮询（切屏/切 Session 不丢任务）。
+            const requestId = entry.key.split(":").pop();
+            setAssistantBusy("optimize-workflow");
+            setAssistantOpen(true);
+            setOptimizationProposal(null);
+            setAssistantDraft("");
+            pollTimerRef.current?.();
+            pollTimerRef.current = pollAssist(requestId, (finalEntry) => applyWorkflowOptimization(finalEntry, {
+              requestId,
+              flow: null,
+              requireUnchangedRevision: false
+            }));
+          } else if (entry.mode === "optimize-workflow" && entry.status === "done" && entry.result) {
+            // 离开期间已完成：回来后应用（requestId 去重，避免每次挂载重复应用）。
+            const requestId = entry.key.split(":").pop();
+            applyWorkflowOptimization(entry, { requestId, flow: null, requireUnchangedRevision: false });
           }
         }
         const proposal = proposalStoreRef.current.get(assistantTargetRef.current);
@@ -1108,6 +1125,113 @@ function Studio({ connection, sessionId, language }) {
     }
   };
 
+  const waitForPersistedFlow = () => new Promise((resolve) => {
+    if (persistedFlowRef.current) { resolve(persistedFlowRef.current); return; }
+    let tries = 0;
+    const timer = setInterval(() => {
+      if (persistedFlowRef.current || ++tries > 50) {
+        clearInterval(timer);
+        resolve(persistedFlowRef.current);
+      }
+    }, 100);
+  });
+
+  const appliedWorkflowAssistRef = useRef(null);
+  const isWorkflowAssistApplied = (requestId) => {
+    if (!appliedWorkflowAssistRef.current) {
+      try {
+        appliedWorkflowAssistRef.current = new Set(JSON.parse(window.sessionStorage.getItem("deepseek-flow:applied-workflow-assists") ?? "[]"));
+      } catch {
+        appliedWorkflowAssistRef.current = new Set();
+      }
+    }
+    return appliedWorkflowAssistRef.current.has(requestId);
+  };
+  const markWorkflowAssistApplied = (requestId) => {
+    if (appliedWorkflowAssistRef.current) appliedWorkflowAssistRef.current.add(requestId);
+    try {
+      window.sessionStorage.setItem("deepseek-flow:applied-workflow-assists", JSON.stringify([...(appliedWorkflowAssistRef.current ?? [])]));
+    } catch {
+      // 会话存储不可用时仅失去切屏去重，不影响结果应用。
+    }
+  };
+
+  const applyWorkflowOptimization = async (entry, { requestId, flow, sourceRevision, requireUnchangedRevision }) => {
+    if (entry.status === "cancelled") {
+      setMessage(t.assistantCancelled);
+      activeAssistRef.current = null;
+      setAssistantBusy(null);
+      return;
+    }
+    if (entry.status !== "done" || !entry.result) {
+      setMessage(t.assistantFailed + String(entry.error ?? ""));
+      activeAssistRef.current = null;
+      setAssistantBusy(null);
+      return;
+    }
+    if (requestId && isWorkflowAssistApplied(requestId)) return;
+    if (!flow) {
+      flow = await waitForPersistedFlow();
+      if (!flow) {
+        setMessage(t.assistantFailed + "workflow unavailable");
+        activeAssistRef.current = null;
+        setAssistantBusy(null);
+        return;
+      }
+    }
+    if (requireUnchangedRevision && documentRevisionRef.current !== sourceRevision) {
+      setMessage(t.workflowChangedDuringOptimization);
+      activeAssistRef.current = null;
+      setAssistantBusy(null);
+      return;
+    }
+    const result = entry.result;
+    const optimized = new Map((result.documents ?? []).map((document) => [document.documentId, String(document.content ?? "")]));
+    const optimizedFlow = {
+      ...flow,
+      workflowContent: optimized.get("workflow") ?? flow.workflowContent,
+      nodes: flow.nodes.map((node) => {
+        const content = optimized.get(node.id);
+        if (content === undefined) return node;
+        const key = node.kind === "agent" || node.kind === "mapAgent" ? "prompt" : "instructions";
+        return { ...node, data: { ...node.data, [key]: content } };
+      })
+    };
+    const flowId = flow.id;
+    if (documentTimerRef.current) clearTimeout(documentTimerRef.current);
+    documentTimerRef.current = null;
+    ++documentRevisionRef.current;
+    await documentWriteChainRef.current.catch(() => {});
+    const documentOnly = mergeDocumentEdits(persistedFlowRef.current, optimizedFlow, optimizedFlow.nodes);
+    const persistedRevision = persistedRevisionRef.current.get(documentOnly.id);
+    const payload = Number.isInteger(persistedRevision)
+      ? { ...documentOnly, revision: persistedRevision }
+      : documentOnly;
+    const saved = await remoteCall(connection, "dflow/put", { flow: payload, sessionId });
+    persistedFlowRef.current = saved;
+    persistedRevisionRef.current.set(saved.id, Number(saved.revision) || 0);
+    setPersistedTopologySignature(topologySignature(saved));
+    if (requestId) markWorkflowAssistApplied(requestId);
+    if (currentIdRef.current !== flowId) {
+      activeAssistRef.current = null;
+      setAssistantBusy(null);
+      return;
+    }
+    setFlows((items) => items.map((item) => item.id === saved.id ? { ...item, ...saved } : item));
+    if (topologySignature(optimizedFlow) === topologySignature(saved)) {
+      showFlow(saved, { resetDocument: false });
+      setDirty(false);
+    } else {
+      const draftNodes = flowToCanvasNodes({ ...optimizedFlow, docs: saved.docs });
+      setNodes(draftNodes);
+      nodesRef.current = draftNodes;
+      setDirty(true);
+    }
+    setMessage(result.summary ? `${t.workflowOptimized}：${result.summary}` : t.workflowOptimized);
+    activeAssistRef.current = null;
+    setAssistantBusy(null);
+  };
+
   const runWorkflowOptimization = async () => {
     if (!currentFlow) return;
     if (!persistedFlowRef.current) {
@@ -1118,7 +1242,6 @@ function Studio({ connection, sessionId, language }) {
     setWorkflowOptimizeConfirm(false);
     const agentRequestId = newRequestId();
     const flow = serializeFlow(currentFlow, nodes, edges);
-    const flowId = flow.id;
     const sourceRevision = documentRevisionRef.current;
     activeAssistRef.current = { requestId: agentRequestId, mode: "optimize-workflow", cancelled: false };
     setAssistantOpen(true);
@@ -1139,69 +1262,12 @@ function Studio({ connection, sessionId, language }) {
       });
       if (!accepted?.accepted) throw new Error("assist not accepted");
       pollTimerRef.current?.();
-      pollTimerRef.current = pollAssist(agentRequestId, async (entry) => {
-        if (entry.status === "cancelled") {
-          setMessage(t.assistantCancelled);
-          activeAssistRef.current = null;
-          setAssistantBusy(null);
-          return;
-        }
-        if (entry.status !== "done" || !entry.result) {
-          setMessage(t.assistantFailed + String(entry.error ?? ""));
-          activeAssistRef.current = null;
-          setAssistantBusy(null);
-          return;
-        }
-        const result = entry.result;
-        if (documentRevisionRef.current !== sourceRevision) {
-          setMessage(t.workflowChangedDuringOptimization);
-          activeAssistRef.current = null;
-          setAssistantBusy(null);
-          return;
-        }
-        const optimized = new Map((result.documents ?? []).map((document) => [document.documentId, String(document.content ?? "")]));
-        const optimizedFlow = {
-          ...flow,
-          workflowContent: optimized.get("workflow") ?? flow.workflowContent,
-          nodes: flow.nodes.map((node) => {
-            const content = optimized.get(node.id);
-            if (content === undefined) return node;
-            const key = node.kind === "agent" || node.kind === "mapAgent" ? "prompt" : "instructions";
-            return { ...node, data: { ...node.data, [key]: content } };
-          })
-        };
-        if (documentTimerRef.current) clearTimeout(documentTimerRef.current);
-        documentTimerRef.current = null;
-        ++documentRevisionRef.current;
-        await documentWriteChainRef.current.catch(() => {});
-        const documentOnly = mergeDocumentEdits(persistedFlowRef.current, optimizedFlow, optimizedFlow.nodes);
-        const persistedRevision = persistedRevisionRef.current.get(documentOnly.id);
-        const payload = Number.isInteger(persistedRevision)
-          ? { ...documentOnly, revision: persistedRevision }
-          : documentOnly;
-        const saved = await remoteCall(connection, "dflow/put", { flow: payload, sessionId });
-        persistedFlowRef.current = saved;
-        persistedRevisionRef.current.set(saved.id, Number(saved.revision) || 0);
-        setPersistedTopologySignature(topologySignature(saved));
-        if (currentIdRef.current !== flowId) {
-          activeAssistRef.current = null;
-          setAssistantBusy(null);
-          return;
-        }
-        setFlows((items) => items.map((item) => item.id === saved.id ? { ...item, ...saved } : item));
-        if (topologySignature(optimizedFlow) === topologySignature(saved)) {
-          showFlow(saved, { resetDocument: false });
-          setDirty(false);
-        } else {
-          const draftNodes = flowToCanvasNodes({ ...optimizedFlow, docs: saved.docs });
-          setNodes(draftNodes);
-          nodesRef.current = draftNodes;
-          setDirty(true);
-        }
-        setMessage(result.summary ? `${t.workflowOptimized}：${result.summary}` : t.workflowOptimized);
-        activeAssistRef.current = null;
-        setAssistantBusy(null);
-      });
+      pollTimerRef.current = pollAssist(agentRequestId, (entry) => applyWorkflowOptimization(entry, {
+        requestId: agentRequestId,
+        flow,
+        sourceRevision,
+        requireUnchangedRevision: true
+      }));
     } catch (error) {
       if (activeAssistRef.current?.requestId === agentRequestId) {
         activeAssistRef.current = null;
