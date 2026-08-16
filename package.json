@@ -70,9 +70,11 @@
     "check": "node --check lib/index.js && node --check lib/ui-state.js && node --check lib/document-workflow.js && node --check lib/dflow-store.js && node --check lib/flow-validation.js && node --check lib/logic-semantics.js && node --check lib/topology-model.js && node --check lib/topology-review.js && node --check lib/workspace-lifecycle.js && node --check lib/agent-assistant.js && node --check src/client/entry.js && node --check src/client/graph-canvas.js && node --check src/client/graph-model.js && node --check src/client/i18n.js && node --check src/client/styles.js && node --test test/*.test.mjs && node scripts/build.mjs && node scripts/client-smoke.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6",
     "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
