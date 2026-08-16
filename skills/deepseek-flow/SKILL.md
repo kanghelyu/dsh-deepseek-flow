@@ -69,5 +69,17 @@ description: >-
 - `flow_list` 列出当前 Session 与共享流程。
 - `flow_read` 返回总纲、步骤文档和 `logicContract`。
 - 实际执行始终由当前 Session 按 `WORKFLOW.md` 和各 `STEP.md` 完成；DeepSeek Flow 负责编辑、持久化和确定性门求值。
+- 删除工作流用 `flow_delete`（共享模板传 `shared: true`）；插件托管的文档工作区会移入回收区，不会误删外部自定义目录。
+
+## 常见报错与修复
+
+| 报错关键词 | 原因 | 修复 |
+| --- | --- | --- |
+| revision changed | 更新前文件被别人写过 | 重新 `flow_read` 取最新 revision 再提交；确要覆盖时才用 `force: true` |
+| cycle detected | 连线成环 | 把重试建模为有界重试步骤或失败终止分支 |
+| reuses true/false branch | IF/ELSE 同一分支连了两个目标 | 每个分支只能连一个目标；聚合用 AND/OR 等门 |
+| requires at least two incoming | 聚合门输入不足 | AND/OR/NAND/NOR/XOR/XNOR 至少两条入边 |
+| unsupported predicate | predicate 写了自然语言 | 只能写 truthy/falsy/nonEmpty；语义判断先让上游 Agent 输出 Boolean |
+| hidden finalize 过期 | `flow_finalize_canvas` 排队超过 30 分钟 | 重新调用一次即可 |
 
 完成创建或更新后，告诉用户打开 DeepSeek Flow 标签即可查看，不要提示再次应用同一修改。

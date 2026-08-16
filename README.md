@@ -31,11 +31,13 @@ It is intentionally an editor—not a workflow runtime. DeepSeek Flow helps you 
 - **Two-way synchronization** — edits made on the canvas and in the Markdown editor are written back to the workflow files.
 - **Source-aware topology transactions** — human canvas edits receive a full current-Session review; topology produced by direct Session file edits can use an invisible deterministic finalize path instead of being sent back to the same Session.
 - **Executable gate semantics** — the exported contract includes formulas, operands, predicates, and deterministic Boolean results without running Agent steps.
-- **Per-session isolation** — each Harness session keeps its own workflows, with optional shared templates.
-- **Comfortable large-flow navigation** — collapsible and resizable side panels, pan and zoom, fit-to-view, animated node focus, and independent scrolling regions.
+- **Per-session isolation** — each Harness session keeps its own workflows, with optional shared templates; the canvas toolbar can delete the current workflow or shared template behind a guarded confirm (managed workspaces move to a trash area and can be recovered).
+- **Comfortable large-flow navigation** — collapsible and resizable side panels, pan and zoom, fit-to-view, animated node focus, and independent scrolling regions; node drags commit once on pointer release and background sync polls lightweight revisions, so large graphs stay smooth.
 - **Native theme support** — the interface follows Harness light and dark themes and the active WebUI language.
 - **Manual AI assistance** — run logic validation, optimize one document with review, or optimize the complete workflow.
 - **Background AI jobs** — switching documents, views, or sessions does not interrupt accepted jobs; document proposals are restored when you return.
+- **Persistent results and drafts** — logic-validation findings, AI proposals, and unapplied canvas drafts are persisted to disk: view switches, session switches, and `dsh web` restarts lose nothing; they are cleared only by an explicit discard or a successful commit. Markdown edits inside the 650 ms autosave window are flushed immediately when you leave the view.
+- **I/O and memory safeguards** — unchanged documents are never rewritten (autosaves no longer grind the SSD), assist history and drafts live in separate files, result polling uses single-key queries with failure and duration caps, every background poll is cancellable with no leaks, and subagents get a 10-minute default timeout.
 - **A bundled Agent Skill** — installs with the plugin, documents every workflow tool, and includes executable IF/ELSE and Boolean-gate examples.
 
 ## Quick start
@@ -209,7 +211,7 @@ deepseek-flow/
 
 </details>
 
-Quality safeguards include 80 automated contract and behavior tests covering graph conversion, revision locking, document lifecycle, topology review, hidden finalization, Boolean semantics, connection validation, Agent jobs, and the generated client bundle. See [Code quality notes](CODE-QUALITY.md) and [QA report](QA-REPORT.md) for more detail.
+Quality safeguards include 91 automated contract and behavior tests covering graph conversion, revision locking, document lifecycle, topology review, hidden finalization, Boolean semantics, connection validation, Agent jobs, and the generated client bundle. See [Code quality notes](CODE-QUALITY.md) and [QA report](QA-REPORT.md) for more detail.
 
 ## Troubleshooting
 
@@ -220,6 +222,7 @@ Quality safeguards include 80 automated contract and behavior tests covering gra
 - **Apply changes is rejected:** fix the reported cycle, missing input, branch limit, or stale revision, then submit the complete topology again.
 - **Apply changes appears after a Session file edit:** wait briefly for Studio's file-origin fallback, or ask the Agent to call `flow_finalize_canvas` with the workflow id and current revision.
 - **The Skill tool returns an empty body:** update the plugin and restart `dsh web`; current releases bundle a valid `skills/deepseek-flow/SKILL.md` and register it after the `skills` service is ready.
+- **Recovering a deleted workflow:** managed workspaces are kept under `deepseek-flow/trash/<date>/`; copy the directory back into `workspaces/` to restore the documents, then re-import the flow JSON with `flow_put`.
 
 ## Uninstall
 

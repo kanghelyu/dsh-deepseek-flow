@@ -11,6 +11,7 @@ const clientSources = await Promise.all([
 ].map((path) => readFile(new URL(path, import.meta.url), "utf8")));
 const client = clientSources.join("\n");
 const host = await readFile(new URL("../lib/index.js", import.meta.url), "utf8");
+const documents = await readFile(new URL("../lib/document-workflow.js", import.meta.url), "utf8");
 const descriptors = await readFile(new URL("../lib/typert.descriptors.js", import.meta.url), "utf8");
 const build = await readFile(new URL("../scripts/build.mjs", import.meta.url), "utf8");
 const ensureDeps = await readFile(new URL("../scripts/ensure-deps.sh", import.meta.url), "utf8");
@@ -160,7 +161,8 @@ test("bottom assistant manually delegates validation and optimization to a one-s
   assert.doesNotMatch(host, /optimizeWorkflowDocument|reviewWorkflow/);
   assert.match(host, /Unsupported dflow\/assist mode/);
   assert.match(host, /"optimize-workflow"/);
-  assert.match(host, /assistantTimeoutMs[\s\S]{0,400}: null/);
+  assert.match(host, /DEFAULT_ASSIST_TIMEOUT_MS = 10 \* 60_000/);
+  assert.match(host, /assistantTimeoutMs[\s\S]{0,400}DEFAULT_ASSIST_TIMEOUT_MS/);
 });
 
 test("document navigation centers nodes with a slow interruptible animation", () => {
@@ -294,6 +296,77 @@ test("external file topology uses an invisible direct-finalize path while canvas
   assert.match(client, /source:\s*"external-files"/);
   assert.match(descriptors, /"finalizePending"/);
   assert.match(descriptors, /"topologyFinalize"/);
+});
+
+test("flow deletion and draft-discard switching are explicit guarded actions", () => {
+  assert.match(client, /"data-df-action": "delete-flow"/);
+  assert.match(client, /"data-df-action": "confirm-delete-flow"/);
+  assert.match(client, /deleteFlowWarningOwned/);
+  assert.match(client, /deleteFlowWarningShared/);
+  assert.match(client, /remoteCall\(connection, "dflow\/delete"/);
+  assert.match(client, /setSwitchFlowTarget/);
+  assert.match(client, /"data-df-action": "confirm-switch-flow"/);
+  assert.match(client, /switchFlowWarning/);
+  assert.match(host, /async revisions\(sessionId\)/);
+  assert.match(host, /if \(shared === true\) return \(await deleteSharedFlow/);
+  assert.match(descriptors, /"revisions"/);
+  assert.match(descriptors, /\["sessionId", "id", "shared"\]/);
+});
+
+test("canvas drag stays local until pointer-up and background sync is revision-gated", () => {
+  assert.match(client, /setLiveDrag/);
+  assert.doesNotMatch(client, /onNodeMove\?\.\(node\.id, \{\s*x: origin\.x \+ \(next\.clientX - startX\)/);
+  assert.match(client, /screenCenter/);
+  assert.match(client, /dflow\/revisions/);
+  assert.match(client, /flowMetaSnapshot/);
+  assert.match(client, /document\.hidden/);
+  assert.match(client, /deepseek-flow:positions:\$\{currentIdRef\.current\}/);
+  assert.match(client, /if \(assistMenuOpen\) \{ setAssistMenuOpen\(false\); return; \}/);
+  assert.match(client, /assistProvider/);
+});
+
+test("AI results and unapplied drafts survive view switches and host restarts", () => {
+  assert.match(host, /import \{ UiStateStore \} from "\.\/ui-state\.js"/);
+  assert.match(host, /const uiState = new UiStateStore\(root\)/);
+  assert.match(host, /uiState,/);
+  assert.match(host, /recordAssist\(this\.host/);
+  assert.match(host, /assistResultTtlMs: Number\.isFinite\(configuredResultTtl\)/);
+  assert.match(host, /async draftSave\(request\)/);
+  assert.match(host, /this\.host\.uiState\.assistHistory\(sessionId, this\.host\.assistResultTtlMs\)/);
+  assert.match(descriptors, /"draftSave"/);
+  assert.match(descriptors, /"draftGet"/);
+  assert.match(descriptors, /"draftClear"/);
+  // Client: restore waits for the initial load (no race), validation keyed per flow,
+  // drafts debounce to disk, pending document edits flush on unmount.
+  assert.match(client, /initialLoadRef/);
+  assert.match(client, /await \(initialLoadRef\.current \?\? Promise\.resolve\(\)\)/);
+  assert.match(client, /validationStoreRef/);
+  assert.match(client, /dflow\/draftSave/);
+  assert.match(client, /restorePersistedDraft/);
+  assert.match(client, /dflow\/draftClear/);
+  assert.match(client, /flushDocumentsRef\.current\?\.\(\)/);
+  assert.match(client, /draftRestored/);
+  // showFlow no longer wipes AI results.
+  assert.doesNotMatch(client, /setValidationResult\(null\)/);
+});
+
+test("I/O and polling safeguards prevent write amplification and runaway loops", () => {
+  // 磁盘：内容不变不写盘；assist 与 drafts 分文件；草稿负载去重。
+  assert.match(documents, /writeIfChanged/);
+  assert.match(client, /lastDraftPayloadRef/);
+  assert.match(client, /payload === lastDraftPayloadRef\.current/);
+  // 轮询：单条 key 查询、连续失败上限、总时长上限、全部登记可取消。
+  assert.match(host, /this\.host\.uiState\.assistEntry\(sessionId, key\)/);
+  assert.match(descriptors, /\["sessionId", "key"\]/);
+  assert.ok(client.includes("key: `${sessionId}:${agentRequestId}`"));
+  assert.match(client, /failures >= 10/);
+  assert.match(client, /20 \* 60_000/);
+  assert.match(client, /pollsRef/);
+  assert.match(client, /trackPoll\(requestId/);
+  assert.match(client, /for \(const cancel of pollsRef\.current\) cancel\(\)/);
+  // 内存：终态条目即出 Map；子代理默认超时兜底。
+  assert.match(host, /else host\.assistResults\.delete\(key\)/);
+  assert.match(host, /DEFAULT_ASSIST_TIMEOUT_MS = 10 \* 60_000/);
 });
 
 test("bundled skill always has a real body and teaches executable gate JSON", () => {

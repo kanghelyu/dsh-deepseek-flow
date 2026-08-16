@@ -186,6 +186,44 @@ test("whole-workflow assist uses the dedicated schema and disposes after a compl
   assert.equal(disposed, 1);
 });
 
+test("explicit assistant selection with provider outranks host config and session default", async () => {
+  let startRequest;
+  const host = {
+    agentCtx: {
+      agents: { get: () => ({ id: "session-a" }) },
+      subagents: {
+        list: () => ["spawn"],
+        getProvider: () => ({ capabilities: {} }),
+        async start(_provider, request) {
+          startRequest = request;
+          return {
+            id: "child-agent",
+            result: Promise.resolve({ stopReason: "completed", structured: { summary: "ok", suggestedContent: "# x" }, output: [] }),
+            async dispose() {}
+          };
+        }
+      }
+    },
+    assistantProvider: undefined,
+    assistantModel: "config-model",
+    assistantTimeoutMs: 5_000,
+    assistControllers: new Map(),
+    assistRuns: new Map(),
+    ctx: { get: () => ({ currentSelection: async () => ({ provider: "deepseek-official", model: "session-model" }) }) }
+  };
+  await runAgentAssist(host, {
+    sessionId: "session-a",
+    requestId: "request-model",
+    flow: flowFixture(),
+    mode: "optimize",
+    target: "input",
+    model: "chosen-model",
+    provider: "other-provider"
+  });
+  assert.equal(startRequest.agentOptions.provider, "other-provider");
+  assert.equal(startRequest.agentOptions.model, "chosen-model");
+});
+
 test("cancel aborts the active child Agent and still disposes its run", async () => {
   let disposed = 0;
   let cancelledTurns = 0;

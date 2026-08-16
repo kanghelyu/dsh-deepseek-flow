@@ -74,8 +74,20 @@ export function GraphCanvas({
   const [viewport, setViewport] = useState({ x: 32, y: 32, zoom: 0.8 });
   const [panning, setPanning] = useState(false);
   const [draggingNode, setDraggingNode] = useState(null);
+  // 拖拽期间的位置只存在本地：每帧只重渲染画布自身，松手才一次性提交给父组件，
+  // 避免整个 Studio（序列化、拓扑签名、检查器）跟着每个 pointermove 重算。
+  const [liveDrag, setLiveDrag] = useState(null);
   const [connectionDraft, setConnectionDraft] = useState(null);
-  const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+  const renderNodes = useMemo(() => liveDrag
+    ? nodes.map((node) => node.id === liveDrag.id ? { ...node, position: liveDrag.position } : node)
+    : nodes, [nodes, liveDrag]);
+  // fitView/focusNode 读取 ref 而不是闭包里的 nodes，从而保持引用稳定：
+  // onInit 只触发一次，父组件不必因节点增删而反复 setState。
+  const nodesRef = React.useRef(renderNodes);
+  useEffect(() => {
+    nodesRef.current = renderNodes;
+  }, [renderNodes]);
+  const byId = useMemo(() => new Map(renderNodes.map((node) => [node.id, node])), [renderNodes]);
 
   const updateViewport = useCallback((value) => {
     setViewport((current) => {
@@ -124,12 +136,14 @@ export function GraphCanvas({
     cleanupRef.current = null;
     setPanning(false);
     setDraggingNode(null);
+    setLiveDrag(null);
   }, [cancelViewportAnimation]);
 
   useEffect(() => stopGesture, [stopGesture]);
 
   const fitView = useCallback((options = {}) => {
     const rect = rootRef.current?.getBoundingClientRect();
+    const nodes = nodesRef.current;
     if (!rect || nodes.length === 0) return;
     const requestedIds = new Set((options.nodes ?? []).map((node) => typeof node === "string" ? node : node?.id).filter(Boolean));
     const visibleNodes = requestedIds.size > 0 ? nodes.filter((node) => requestedIds.has(node.id)) : nodes;
@@ -150,11 +164,11 @@ export function GraphCanvas({
       y: (rect.height - graphHeight * zoom) / 2 - minY * zoom,
       zoom
     }, options.duration);
-  }, [animateViewport, nodes]);
+  }, [animateViewport]);
 
   const focusNode = useCallback((id, options = {}) => {
     const rect = rootRef.current?.getBoundingClientRect();
-    const node = nodes.find((candidate) => candidate.id === id);
+    const node = nodesRef.current.find((candidate) => candidate.id === id);
     if (!rect || !node) return;
     const zoom = clamp(Number(options.zoom ?? Math.max(viewportRef.current.zoom, 0.96)), GRAPH_MIN_ZOOM, 1.15);
     animateViewport({
@@ -162,11 +176,22 @@ export function GraphCanvas({
       y: rect.height / 2 - (node.position.y + GRAPH_NODE_HEIGHT / 2) * zoom,
       zoom
     }, options.duration ?? 720);
-  }, [animateViewport, nodes]);
+  }, [animateViewport]);
+
+  // 当前视口中心的世界坐标：父组件用它把新建流程框放到用户正在看的位置。
+  const screenCenter = useCallback(() => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 160, y: 120 };
+    const view = viewportRef.current;
+    return {
+      x: Math.round((rect.width / 2 - view.x) / view.zoom - GRAPH_NODE_WIDTH / 2),
+      y: Math.round((rect.height / 2 - view.y) / view.zoom - GRAPH_NODE_HEIGHT / 2)
+    };
+  }, []);
 
   useEffect(() => {
-    onInit?.({ fitView, focusNode });
-  }, [fitView, focusNode, onInit]);
+    onInit?.({ fitView, focusNode, screenCenter });
+  }, [fitView, focusNode, onInit, screenCenter]);
 
   const screenToWorld = useCallback((clientX, clientY) => {
     const rect = rootRef.current?.getBoundingClientRect();
@@ -196,21 +221,32 @@ export function GraphCanvas({
   const beginPan = useCallback((event) => {
     if (event.button !== 0 || event.target.closest?.(".df-graph__node,.df-graph__controls")) return;
     event.preventDefault();
-    onPaneClick?.();
     stopGesture();
     const startX = event.clientX;
     const startY = event.clientY;
-    const origin = viewport;
+    const origin = viewportRef.current;
     setPanning(true);
-    const move = (next) => setViewport({ ...origin, x: origin.x + next.clientX - startX, y: origin.y + next.clientY - startY });
-    const up = () => stopGesture();
+    let moved = false;
+    // 走 updateViewport 保证 viewportRef 与 state 同步：后续 fitView 动画
+    // 从 ref 取起点，漏同步会造成视图突跳。
+    const move = (next) => {
+      const dx = next.clientX - startX;
+      const dy = next.clientY - startY;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
+      updateViewport({ x: origin.x + dx, y: origin.y + dy, zoom: origin.zoom });
+    };
+    // 只有「原地单击空白处」才取消选中；单纯平移视图不打断当前选中。
+    const up = () => {
+      if (!moved) onPaneClick?.();
+      stopGesture();
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up, { once: true });
     cleanupRef.current = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [onPaneClick, stopGesture, viewport]);
+  }, [onPaneClick, stopGesture, updateViewport]);
 
   const beginNodeDrag = useCallback((node, event) => {
     if (event.button !== 0 || event.target.closest?.(".df-graph__handle")) return;
@@ -223,18 +259,27 @@ export function GraphCanvas({
     const startY = event.clientY;
     const origin = node.position;
     setDraggingNode(node.id);
-    const move = (next) => onNodeMove?.(node.id, {
-      x: origin.x + (next.clientX - startX) / viewport.zoom,
-      y: origin.y + (next.clientY - startY) / viewport.zoom
-    });
-    const up = () => stopGesture();
+    setLiveDrag({ id: node.id, position: origin });
+    let latest = origin;
+    const move = (next) => {
+      latest = {
+        x: origin.x + (next.clientX - startX) / viewportRef.current.zoom,
+        y: origin.y + (next.clientY - startY) / viewportRef.current.zoom
+      };
+      setLiveDrag({ id: node.id, position: latest });
+    };
+    const up = () => {
+      if (latest !== origin) onNodeMove?.(node.id, latest);
+      setLiveDrag(null);
+      stopGesture();
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up, { once: true });
     cleanupRef.current = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [onNodeDragStart, onNodeMove, onNodeSelect, stopGesture, viewport.zoom]);
+  }, [onNodeDragStart, onNodeMove, onNodeSelect, stopGesture]);
 
   const beginConnection = useCallback((source, event) => {
     if (event.button !== 0) return;
@@ -366,7 +411,7 @@ export function GraphCanvas({
         ),
         edgeElements
       ),
-      nodes.map((node) => React.createElement("div", {
+      renderNodes.map((node) => React.createElement("div", {
         key: node.id,
         className: `df-graph__node${draggingNode === node.id ? " is-dragging" : ""}${connectionDraft?.hoverTarget === node.id ? " is-connect-target" : ""}`,
         style: { left: `${node.position.x}px`, top: `${node.position.y}px` },

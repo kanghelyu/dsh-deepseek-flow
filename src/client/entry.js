@@ -131,24 +131,43 @@ function Studio({ connection, sessionId, language }) {
   // 需求：busy 按文档隔离（per-target），切文档后按钮回到初始态，可并发发起其他文档的优化。
   const [runningDocs, setRunningDocs] = useState(() => new Map());
   const [assistModel, setAssistModel] = useState("");
+  // 模型选择必须连同 provider 一起传给 Host：不同 provider 下同名模型不是同一个东西，
+  // 只传模型名会让 Host 错误地落到会话默认 provider 上。
+  const [assistProvider, setAssistProvider] = useState(null);
   const [assistEffort, setAssistEffort] = useState("");
   const [assistMenuOpen, setAssistMenuOpen] = useState(false);
   const [assistMenuPage, setAssistMenuPage] = useState(null);
   const [assistModelOptions, setAssistModelOptions] = useState(null);
-  const [assistantInstruction, setAssistantInstruction] = useState("");
+  const [assistantInstruction, setAssistantInstruction] = useState(() => {
+    try {
+      return window.localStorage.getItem("deepseek-flow:assistant-instruction") ?? "";
+    } catch {
+      return "";
+    }
+  });
   const [validationResult, setValidationResult] = useState(null);
   const [findingFilter, setFindingFilter] = useState(null);
   const [optimizationProposal, setOptimizationProposal] = useState(null);
   const [assistantDraft, setAssistantDraft] = useState("");
   // 需求 6：每个文档的优化方案独立保留（切文档不丢、并发互不覆盖）。
   const proposalStoreRef = React.useRef(new Map());
-  const pollTimerRef = React.useRef(null);
+  // 所有活动轮询的取消函数集合：单槽 ref 会让并发任务的轮询互相取消（按钮卡死），
+  // 也会让「历史恢复」派生的轮询在卸载后泄漏成每 3 秒一次的空转。
+  const pollsRef = React.useRef(new Set());
+  // 上次落盘的草稿负载：内容没变就不发 RPC、不写盘。
+  const lastDraftPayloadRef = React.useRef(null);
   const topologyPollRef = React.useRef(null);
   const [workflowOptimizeConfirm, setWorkflowOptimizeConfirm] = useState(false);
   const [cancelConfirm, setCancelConfirm] = useState(null);
   const [topologyApplyConfirm, setTopologyApplyConfirm] = useState(false);
   const [topologyApplyBusy, setTopologyApplyBusy] = useState(false);
   const [persistedTopologySignature, setPersistedTopologySignature] = useState("");
+  const [deleteFlowConfirm, setDeleteFlowConfirm] = useState(false);
+  const [deleteFlowBusy, setDeleteFlowBusy] = useState(false);
+  // 带未应用拓扑草稿时切换工作流需要显式丢弃确认。
+  const [switchFlowTarget, setSwitchFlowTarget] = useState(null);
+  // 文档路径输入采用「草稿 + 失焦/回车提交」：避免逐键触发整条保存链路和目录搬运。
+  const [docPathDraft, setDocPathDraft] = useState(null);
   const fileRef = React.useRef(null);
   const documentTimerRef = React.useRef(null);
   const fitTimerRef = React.useRef(null);
@@ -170,6 +189,23 @@ function Studio({ connection, sessionId, language }) {
   const canvasShellRef = React.useRef(null);
   const panelDragRef = React.useRef(null);
   const assistantDragRef = React.useRef(null);
+  const assistMenuRef = React.useRef(null);
+  // 后台轻量同步：记录最近一次已知的 flow 元数据签名，revision 无变化就不拉全量文档。
+  const flowMetaSnapshotRef = React.useRef(null);
+  // 初始加载承诺：历史恢复必须等它完成，否则 showFlow 的重置会盖掉恢复的结果（切屏丢失的根因之一）。
+  const initialLoadRef = React.useRef(null);
+  // 逻辑校验结果按 flowId 存取：切走再切回、拓扑应用后都不再凭空消失。
+  const validationStoreRef = React.useRef(new Map());
+  // 未应用画布草稿：防抖落盘到 Host ui-state，重启/切屏都可恢复。
+  const draftTimerRef = React.useRef(null);
+  const draftSavedRef = React.useRef(false);
+  const flushDocumentsRef = React.useRef(null);
+  const pendingDocumentSnapshotRef = React.useRef(null);
+
+  // flow 元数据签名：id + 归属 + revision，用于后台轻量同步的变更判断。
+  const flowMetaSnapshot = useCallback((items) => JSON.stringify(
+    (Array.isArray(items) ? items : []).map((flow) => [flow.id, flow.sessionId ?? null, Number(flow.revision) || 0])
+  ), []);
 
   const markCanvasTopologyEdit = useCallback(() => {
     canvasTopologyEditedRef.current = true;
@@ -315,10 +351,9 @@ function Studio({ connection, sessionId, language }) {
     setEdges(flowToCanvasEdges(flow.edges, t));
     historyRef.current = { past: [], future: [] };
     setSelectedEdge(null);
-    setValidationResult(null);
-    setFindingFilter(null);
-    setOptimizationProposal(null);
-    setAssistantDraft("");
+    // 校验结果与优化方案按 flow/文档存取（validationStoreRef / proposalStoreRef +
+    // 下方 [currentId, assistantTarget] 恢复 effect），不再在每次加载时清空：
+    // 切屏回来、拓扑应用、后台同步都不该让用户没保存的 AI 结果凭空消失。
     setWorkflowOptimizeConfirm(false);
     setTopologyApplyConfirm(false);
     setTopologyApplyBusy(false);
@@ -328,13 +363,43 @@ function Studio({ connection, sessionId, language }) {
     }
   }, [setEdges, setNodes, t]);
 
+  const restorePersistedDraft = useCallback(async (flow) => {
+    if (!flow?.id) return;
+    try {
+      const draft = await remoteCall(connection, "dflow/draftGet", { sessionId, flowId: flow.id });
+      if (!draft || !Array.isArray(draft.nodes) || draft.nodes.length === 0) return;
+      const persistedRevision = persistedRevisionRef.current.get(flow.id);
+      if (Number.isInteger(persistedRevision) && Number(draft.baseRevision) !== persistedRevision) {
+        // 基线已前进：草稿大概率已被应用或过期，静默丢弃，避免「应用修改」必然撞 revision 冲突。
+        remoteCall(connection, "dflow/draftClear", { sessionId, flowId: flow.id }).catch(() => {});
+        return;
+      }
+      canvasTopologyEditedRef.current = draft.canvasEdited ?? true;
+      nodesRef.current = draft.nodes;
+      edgesRef.current = draft.edges ?? [];
+      setNodes(draft.nodes);
+      setEdges(draft.edges ?? []);
+      if (draft.activeDoc) {
+        setSelected(draft.activeDoc === "workflow" ? null : draft.activeDoc);
+        setActiveDoc(draft.activeDoc);
+      }
+      setDirty(true);
+      draftSavedRef.current = true;
+      setMessage(t.draftRestored);
+    } catch {
+      // 草稿恢复失败不阻塞编辑器。
+    }
+  }, [connection, sessionId, setEdges, setNodes, t.draftRestored]);
+
   const loadFlows = useCallback(async () => {
     try {
       const items = await remoteCall(connection, "dflow/list", { sessionId });
       setFlows(items);
+      flowMetaSnapshotRef.current = flowMetaSnapshot(items);
       const first = items.find((item) => item.id === currentIdRef.current) ?? items[0];
       if (first) {
         showFlow(first, { resetDocument: currentIdRef.current !== first.id });
+        await restorePersistedDraft(first);
       } else {
         currentIdRef.current = null;
         persistedFlowRef.current = null;
@@ -348,10 +413,11 @@ function Studio({ connection, sessionId, language }) {
     } catch (error) {
       setMessage(String(error));
     }
-  }, [connection, sessionId, setEdges, setNodes, showFlow, t.ready]);
+  }, [connection, flowMetaSnapshot, restorePersistedDraft, sessionId, setEdges, setNodes, showFlow, t.ready]);
 
   useEffect(() => {
-    loadFlows();
+    // 初始加载承诺：历史恢复等它落定后再执行，消除「showFlow 重置 vs 结果恢复」的竞态。
+    if (!initialLoadRef.current) initialLoadRef.current = loadFlows().catch(() => {});
   }, [loadFlows]);
 
   useEffect(() => {
@@ -371,11 +437,16 @@ function Studio({ connection, sessionId, language }) {
 
   useEffect(() => {
     // 需求 1：从 Host 恢复本 Session 的 assist 结果（切视图/卸载后回来，方案和校验结果不丢）。
+    // 先等初始加载完成：showFlow 的结构性重置必须先落定，恢复的结果才不会被覆盖。
     let cancelled = false;
     (async () => {
       try {
+        await (initialLoadRef.current ?? Promise.resolve());
         const history = await remoteCall(connection, "dflow/assistHistory", { sessionId });
         if (cancelled || !Array.isArray(history)) return;
+        const currentFlowId = currentIdRef.current;
+        const matchesFlow = (entry) => !entry.flowId || entry.flowId === currentFlowId;
+        let latestLogic = null;
         for (const entry of history) {
           if (entry.mode === "optimize" && entry.target && !proposalStoreRef.current.has(entry.target)) {
             if (entry.status === "done" && entry.result) {
@@ -387,7 +458,7 @@ function Studio({ connection, sessionId, language }) {
               const target = entry.target;
               const requestId = entry.key.split(":").pop();
               setRunningDocs((prev) => { const next = new Map(prev); next.set(target, requestId); return next; });
-              pollAssist(requestId, (finalEntry) => {
+              trackPoll(requestId, (finalEntry) => {
                 if (finalEntry.status === "cancelled") {
                   if (assistantTargetRef.current === target) setMessage(t.assistantCancelled);
                 } else if (finalEntry.status === "done" && finalEntry.result) {
@@ -405,17 +476,19 @@ function Studio({ connection, sessionId, language }) {
                 activeAssistRef.current = null;
               });
             }
-          } else if (entry.mode === "logic" && entry.status === "done" && entry.result) {
-            setValidationResult(entry.result);
-          } else if (entry.mode === "logic" && entry.status === "running") {
+          } else if (entry.mode === "logic" && entry.status === "done" && entry.result && !latestLogic && matchesFlow(entry)) {
+            // 只取最新一次同 flow 的校验结果（历史按新→旧排序）。
+            latestLogic = entry;
+          } else if (entry.mode === "logic" && entry.status === "running" && matchesFlow(entry)) {
             // 逻辑校验仍在运行：继续轮询直到完成（切 UI 回来不用重新发起）
             const requestId = entry.key.split(":").pop();
             setAssistantBusy("logic");
-            pollAssist(requestId, (finalEntry) => {
+            trackPoll(requestId, (finalEntry) => {
               if (finalEntry.status === "cancelled") {
                 setMessage(t.assistantCancelled);
               } else if (finalEntry.status === "done" && finalEntry.result) {
-                setValidationResult(finalEntry.result);
+                validationStoreRef.current.set(finalEntry.flowId ?? currentIdRef.current, finalEntry.result);
+            setValidationResult(finalEntry.result);
                 setFindingFilter(null);
                 setMessage(t.validationComplete);
               } else {
@@ -428,8 +501,10 @@ function Studio({ connection, sessionId, language }) {
             const requestId = entry.key.split(":").pop();
             setTopologyApplyBusy(true);
             setMessage(t.topologyApplying);
+            if (topologyPollRef.current) pollsRef.current.delete(topologyPollRef.current);
             topologyPollRef.current?.();
             topologyPollRef.current = pollAssist(requestId, (finalEntry) => {
+              pollsRef.current.delete(topologyPollRef.current);
               topologyPollRef.current = null;
               setTopologyApplyBusy(false);
               if (finalEntry.status === "done" && finalEntry.result?.flow) {
@@ -440,6 +515,7 @@ function Studio({ connection, sessionId, language }) {
                 setMessage(t.topologyApplyFailed + String(finalEntry.error ?? ""));
               }
             });
+            pollsRef.current.add(topologyPollRef.current);
           } else if (entry.mode === "topology-apply" && entry.status === "done" && entry.result?.flow) {
             const knownRevision = persistedRevisionRef.current.get(entry.result.flow.id) ?? 0;
             if (Number(entry.result.flow.revision) > knownRevision) {
@@ -453,8 +529,7 @@ function Studio({ connection, sessionId, language }) {
             setAssistantOpen(true);
             setOptimizationProposal(null);
             setAssistantDraft("");
-            pollTimerRef.current?.();
-            pollTimerRef.current = pollAssist(requestId, (finalEntry) => applyWorkflowOptimization(finalEntry, {
+            trackPoll(requestId, (finalEntry) => applyWorkflowOptimization(finalEntry, {
               requestId,
               flow: null,
               requireUnchangedRevision: false
@@ -464,6 +539,11 @@ function Studio({ connection, sessionId, language }) {
             const requestId = entry.key.split(":").pop();
             applyWorkflowOptimization(entry, { requestId, flow: null, requireUnchangedRevision: false });
           }
+        }
+        if (latestLogic) {
+          validationStoreRef.current.set(latestLogic.flowId ?? currentFlowId, latestLogic.result);
+          setValidationResult(latestLogic.result);
+          setFindingFilter(null);
         }
         const proposal = proposalStoreRef.current.get(assistantTargetRef.current);
         if (proposal && typeof proposal.suggestedContent === "string") {
@@ -493,17 +573,35 @@ function Studio({ connection, sessionId, language }) {
     return () => window.removeEventListener("resize", update);
   }, []);
 
+  // 助手模型菜单：点击菜单外任意位置关闭（此前只有再点一次按钮才能关）。
+  useEffect(() => {
+    if (!assistMenuOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (assistMenuRef.current && !assistMenuRef.current.contains(event.target)) setAssistMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [assistMenuOpen]);
+
   useEffect(() => keepLayout("deepseek-flow:left-open", documentsOpen), [documentsOpen]);
   useEffect(() => keepLayout("deepseek-flow:right-open", inspectorOpen), [inspectorOpen]);
   useEffect(() => keepLayout("deepseek-flow:left-width", Math.round(documentWidth)), [documentWidth]);
   useEffect(() => keepLayout("deepseek-flow:right-width", Math.round(inspectorWidth)), [inspectorWidth]);
   useEffect(() => keepLayout("deepseek-flow:assistant-open", assistantOpen), [assistantOpen]);
   useEffect(() => keepLayout("deepseek-flow:assistant-height", Math.round(assistantHeight)), [assistantHeight]);
+  useEffect(() => keepLayout("deepseek-flow:assistant-instruction", assistantInstruction), [assistantInstruction]);
 
   useEffect(() => () => {
-    if (documentTimerRef.current) clearTimeout(documentTimerRef.current);
+    // 卸载（切视图/切会话）时立刻冲刷 650ms 防抖窗口内的文档修改，而不是静默丢弃。
+    if (documentTimerRef.current) {
+      clearTimeout(documentTimerRef.current);
+      documentTimerRef.current = null;
+      flushDocumentsRef.current?.();
+    }
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
-    if (pollTimerRef.current) pollTimerRef.current();
+    for (const cancel of pollsRef.current) cancel();
+    pollsRef.current.clear();
     if (topologyPollRef.current) topologyPollRef.current();
     if (panelDragRef.current) {
       window.removeEventListener("pointermove", panelDragRef.current.onMove);
@@ -532,6 +630,8 @@ function Studio({ connection, sessionId, language }) {
   }, [edges]);
 
   useEffect(() => {
+    // 只在切换工作流时整图居中：新增/删除流程框后视图不应突然缩放跳动，
+    // 用户此刻往往正在检查器里编辑。
     if (!flowInstance || !currentId || nodes.length === 0) return undefined;
     if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
     fitTimerRef.current = setTimeout(() => {
@@ -541,10 +641,39 @@ function Studio({ connection, sessionId, language }) {
     return () => {
       if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
     };
-  }, [currentId, flowInstance, nodes.length]);
+  }, [currentId, flowInstance]);
+
+  // 拓扑派生值全部 memo 化：这些计算要做多次 JSON 序列化，
+  // 若在每次渲染（包括拖拽、消息更新）都重算，大图会明显掉帧。
+  const currentFlow = useMemo(() => flows.find((f) => f.id === currentId) ?? null, [currentId, flows]);
+  const currentDraftFlow = useMemo(
+    () => currentFlow ? serializeFlow(currentFlow, nodes, edges) : null,
+    [currentFlow, nodes, edges]
+  );
+  const currentTopologySignature = useMemo(
+    () => currentDraftFlow ? topologySignature(currentDraftFlow) : "",
+    [currentDraftFlow]
+  );
+  const topologyDirty = Boolean(currentDraftFlow && currentTopologySignature !== persistedTopologySignature);
+  const topologyDelta = useMemo(() => currentDraftFlow
+    ? topologyDiff(persistedFlowRef.current ?? {
+        ...currentDraftFlow,
+        nodes: [],
+        edges: [],
+        inputs: [],
+        outputs: []
+      }, currentDraftFlow)
+    : null, [currentDraftFlow, persistedTopologySignature]);
+  const selectedNode = useMemo(() => nodes.find((n) => n.id === selected) ?? null, [nodes, selected]);
 
   const selectFlow = async (id) => {
     if (id === currentId) return;
+    // 有未应用的拓扑草稿时切换会丢草稿，必须先让用户显式选择「丢弃并切换」，
+    // 而不是顺手把拓扑送审或静默丢弃。
+    if (topologyDirty) {
+      setSwitchFlowTarget(id);
+      return;
+    }
     if (dirty || documentTimerRef.current) {
       const saved = await save();
       if (!saved) return;
@@ -555,20 +684,28 @@ function Studio({ connection, sessionId, language }) {
     setDirty(false);
   };
 
-  const currentFlow = flows.find((f) => f.id === currentId) ?? null;
-  const currentDraftFlow = currentFlow ? serializeFlow(currentFlow, nodes, edges) : null;
-  const currentTopologySignature = currentDraftFlow ? topologySignature(currentDraftFlow) : "";
-  const topologyDirty = Boolean(currentDraftFlow && currentTopologySignature !== persistedTopologySignature);
-  const topologyDelta = currentDraftFlow
-    ? topologyDiff(persistedFlowRef.current ?? {
-        ...currentDraftFlow,
-        nodes: [],
-        edges: [],
-        inputs: [],
-        outputs: []
-      }, currentDraftFlow)
-    : null;
-  const selectedNode = nodes.find((n) => n.id === selected) ?? null;
+  const discardAndSwitchFlow = useCallback(() => {
+    const target = switchFlowTarget;
+    setSwitchFlowTarget(null);
+    if (!target) return;
+    if (documentTimerRef.current) {
+      clearTimeout(documentTimerRef.current);
+      documentTimerRef.current = null;
+    }
+    ++documentRevisionRef.current;
+    pendingDocumentSnapshotRef.current = null;
+    // 用户显式丢弃：被离开工作流的未应用草稿一并清除（这是唯一主动删草稿的路径之一）。
+    const discardedFlowId = currentIdRef.current;
+    if (discardedFlowId && discardedFlowId !== target) {
+      draftSavedRef.current = false;
+      remoteCall(connection, "dflow/draftClear", { sessionId, flowId: discardedFlowId }).catch(() => {});
+    }
+    const flow = flows.find((f) => f.id === target);
+    if (!flow) return;
+    showFlow(flow);
+    setDirty(false);
+    setMessage(t.discardedDraftSwitch);
+  }, [connection, flows, sessionId, showFlow, switchFlowTarget, t.discardedDraftSwitch]);
 
   const finalizeTopologyDirectly = useCallback(async () => {
     if (agentFinalizeBusyRef.current || canvasTopologyEditedRef.current) return;
@@ -658,15 +795,23 @@ function Studio({ connection, sessionId, language }) {
   useEffect(() => {
     let cancelled = false;
     let refreshing = false;
+    // 后台同步走「轻量 revision 轮询」：dflow/revisions 只回 id/revision，
+    // 元数据没变就不拉全量文档；页签隐藏时完全静默，回到可见立即补一次。
     const refreshPersistedFlow = async () => {
-      if (refreshing || topologyApplyBusy || documentTimerRef.current) return;
-      const flowId = currentIdRef.current;
-      const baseFlow = persistedFlowRef.current;
-      if (!flowId || !baseFlow) return;
+      if (refreshing || document.hidden || topologyApplyBusy || documentTimerRef.current) return;
       refreshing = true;
       try {
+        const meta = await remoteCall(connection, "dflow/revisions", { sessionId });
+        if (cancelled || !Array.isArray(meta)) return;
+        const nextSnapshot = flowMetaSnapshot(meta);
+        if (nextSnapshot === flowMetaSnapshotRef.current) return;
         const items = await remoteCall(connection, "dflow/list", { sessionId });
         if (cancelled || !Array.isArray(items)) return;
+        flowMetaSnapshotRef.current = flowMetaSnapshot(items);
+        setFlows(items);
+        const flowId = currentIdRef.current;
+        const baseFlow = persistedFlowRef.current;
+        if (!flowId || !baseFlow) return;
         const remoteFlow = items.find((item) => item.id === flowId);
         if (!remoteFlow) return;
         const knownRevision = persistedRevisionRef.current.get(flowId) ?? 0;
@@ -677,7 +822,6 @@ function Studio({ connection, sessionId, language }) {
           setMessage(t.topologySessionConflict);
           return;
         }
-        setFlows(items);
         if (decision === "documents-only") {
           persistedFlowRef.current = remoteFlow;
           persistedRevisionRef.current.set(flowId, Number(remoteFlow.revision) || 0);
@@ -706,7 +850,7 @@ function Studio({ connection, sessionId, language }) {
       window.removeEventListener("focus", refreshPersistedFlow);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [connection, sessionId, showFlow, t.topologyAlreadyPersisted, t.topologySessionConflict, t.topologySessionSynced, topologyApplyBusy]);
+  }, [connection, flowMetaSnapshot, sessionId, showFlow, t.topologyAlreadyPersisted, t.topologySessionConflict, t.topologySessionSynced, topologyApplyBusy]);
 
   const selectedConditionInputs = selectedNode?.data?.kind === "condition"
     ? edges
@@ -756,6 +900,8 @@ function Studio({ connection, sessionId, language }) {
     }
     if (documentTimerRef.current) clearTimeout(documentTimerRef.current);
     const editRevision = ++documentRevisionRef.current;
+    // 记录待冲刷快照：视图卸载时立即落盘，防抖窗口不再是丢失窗口。
+    pendingDocumentSnapshotRef.current = { flowSnapshot, nodeSnapshot, edgeSnapshot, editRevision };
     setMessage(t.autoSaving);
     documentTimerRef.current = setTimeout(() => {
       documentTimerRef.current = null;
@@ -887,27 +1033,31 @@ function Studio({ connection, sessionId, language }) {
 
   const moveNode = useCallback((id, position) => {
     setNodes((items) => items.map((node) => node.id === id ? { ...node, position } : node));
-    // 位置是查看状态（与面板宽度同级），随移动静默持久化，不参与拓扑事务。
+    // 位置是查看状态（与面板宽度同级）：拖拽结束时静默持久化一次，
+    // 不参与拓扑事务，也不把文档保存状态弄脏。key 必须取当前 flow id——
+    // 旧实现闭包捕获了初始 currentId(null)，导致所有位置都写进同一个废桶。
     try {
-      const key = `deepseek-flow:positions:${currentId}`;
+      const key = `deepseek-flow:positions:${currentIdRef.current}`;
       const stored = JSON.parse(localStorage.getItem(key) ?? "{}");
       stored[id] = position;
       localStorage.setItem(key, JSON.stringify(stored));
     } catch {
       // 存储不可用时忽略
     }
-    ++documentRevisionRef.current;
-    setDirty(true);
   }, []);
 
   const createNode = (kind, gateType = null) => {
     rememberGraph();
     markCanvasTopologyEdit();
     const id = `${kind}-${Math.random().toString(36).slice(2, 7)}`;
+    // 新流程框落在用户正在看的视口中心（连续新建时阶梯错开），
+    // 不再随机出现在左上角、需要用户到处找。
+    const center = flowInstance?.screenCenter?.() ?? { x: 160, y: 120 };
+    const cascade = nodes.length % 4;
     const node = {
       id,
       type: "flow",
-      position: { x: 120 + Math.random() * 220, y: 80 + Math.random() * 160 },
+      position: { x: center.x + cascade * 26, y: center.y + cascade * 26 },
       data: {
         kind,
         label: t.nodeKind[kind] ?? kind,
@@ -1080,6 +1230,34 @@ function Studio({ connection, sessionId, language }) {
     setMessage(t.exportOk);
   };
 
+  const deleteCurrentFlow = async () => {
+    if (!currentFlow || deleteFlowBusy) return;
+    setDeleteFlowBusy(true);
+    try {
+      // 共享模板没有 sessionId，需要显式走 shared 通道删除。
+      await remoteCall(connection, "dflow/delete", {
+        sessionId,
+        id: currentFlow.id,
+        ...(currentFlow.sessionId ? {} : { shared: true })
+      });
+      if (documentTimerRef.current) {
+        clearTimeout(documentTimerRef.current);
+        documentTimerRef.current = null;
+      }
+      pendingDocumentSnapshotRef.current = null;
+      draftSavedRef.current = false;
+      remoteCall(connection, "dflow/draftClear", { sessionId, flowId: currentFlow.id }).catch(() => {});
+      ++documentRevisionRef.current;
+      setMessage(t.deleteFlowDone + String(currentFlow.name));
+      setDeleteFlowConfirm(false);
+      await loadFlows();
+    } catch (error) {
+      setMessage(t.deleteFlowFailed + String(error));
+    } finally {
+      setDeleteFlowBusy(false);
+    }
+  };
+
   const assistantTarget = activeDoc === "workflow" ? "workflow" : activeDoc;
   const assistantDocLabel = assistantTarget === "workflow"
     ? (currentFlow?.workflowDoc ?? "WORKFLOW.md")
@@ -1088,6 +1266,60 @@ function Studio({ connection, sessionId, language }) {
   useEffect(() => {
     assistantTargetRef.current = assistantTarget;
   }, [assistantTarget]);
+
+  useEffect(() => {
+    // 路径草稿跟随选中节点/工作流：切走即放弃未提交的半截路径。
+    setDocPathDraft(null);
+  }, [selected, currentId]);
+
+  useEffect(() => {
+    // 卸载冲刷用：始终持有「按最新快照持久化」的可调用闭包。
+    flushDocumentsRef.current = () => {
+      const pending = pendingDocumentSnapshotRef.current;
+      if (pending) persistDocumentSnapshot(pending.flowSnapshot, pending.nodeSnapshot, pending.edgeSnapshot).catch(() => {});
+    };
+  }, [persistDocumentSnapshot]);
+
+  useEffect(() => {
+    // 校验结果按 flow 恢复：切走再切回、重启后重新挂载都能看到上一次的结果。
+    setValidationResult(currentId ? validationStoreRef.current.get(currentId) ?? null : null);
+    setFindingFilter(null);
+  }, [currentId]);
+
+  useEffect(() => {
+    // 未应用草稿防抖落盘（800ms）：切视图/重启后由 restorePersistedDraft 恢复。
+    if (!currentId || (!dirty && !topologyDirty) || topologyApplyBusy) return undefined;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    const flowId = currentId;
+    const savedAtBase = persistedRevisionRef.current.get(flowId);
+    draftTimerRef.current = setTimeout(() => {
+      draftTimerRef.current = null;
+      const draft = {
+        nodes: nodesRef.current,
+        edges: edgesRef.current,
+        activeDoc,
+        canvasEdited: canvasTopologyEditedRef.current,
+        baseRevision: savedAtBase
+      };
+      const payload = JSON.stringify(draft);
+      if (payload === lastDraftPayloadRef.current) return;
+      lastDraftPayloadRef.current = payload;
+      draftSavedRef.current = true;
+      remoteCall(connection, "dflow/draftSave", { sessionId, flowId, draft }).catch(() => {});
+    }, 800);
+    return () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    };
+  }, [activeDoc, connection, currentId, dirty, nodes, edges, sessionId, topologyApplyBusy, topologyDirty]);
+
+  useEffect(() => {
+    // 一切提交干净（保存/应用/定稿完成）后自动清草稿；仅在本会话确实保存过草稿时触发，
+    // 避免挂载瞬间把等待恢复的草稿误删。
+    if (!currentId || dirty || topologyDirty || topologyApplyBusy || !draftSavedRef.current) return;
+    draftSavedRef.current = false;
+    lastDraftPayloadRef.current = null;
+    remoteCall(connection, "dflow/draftClear", { sessionId, flowId: currentId }).catch(() => {});
+  }, [connection, currentId, dirty, sessionId, topologyApplyBusy, topologyDirty]);
 
   useEffect(() => {
     // 需求 6：切换文档时恢复该文档自己的方案槽（不存在则清空显示）。
@@ -1108,19 +1340,46 @@ function Studio({ connection, sessionId, language }) {
   };
 
   // 轮询 Host 侧 assist 结果（fire-and-forget 模式：请求在 Host 独立执行，Client 断开不影响）。
+  // 三重保险避免「卡着一直循环」：单条 key 查询（不拉全量历史）、连续失败上限、总时长上限。
   const pollAssist = (agentRequestId, onDone) => {
+    const startedAt = Date.now();
+    let failures = 0;
     const timer = setInterval(async () => {
+      const expired = Date.now() - startedAt > 20 * 60_000;
       try {
-        const history = await remoteCall(connection, "dflow/assistHistory", { sessionId });
-        const entry = (Array.isArray(history) ? history : []).find((item) => item.key === `${sessionId}:${agentRequestId}`);
-        if (!entry || entry.status === "running") return;
+        const entries = await remoteCall(connection, "dflow/assistHistory", {
+          sessionId,
+          key: `${sessionId}:${agentRequestId}`
+        });
+        const entry = Array.isArray(entries) ? entries[0] : null;
+        if (!entry || entry.status === "running") {
+          if (expired) {
+            clearInterval(timer);
+            onDone({ status: "error", error: "result polling timed out" });
+          }
+          return;
+        }
         clearInterval(timer);
         onDone(entry);
       } catch {
-        // 轮询偶发失败下一轮重试
+        // 偶发失败下一轮重试；连续 10 次或超时则终止，绝不无限空转。
+        if (++failures >= 10 || expired) {
+          clearInterval(timer);
+          onDone({ status: "error", error: "result polling failed repeatedly" });
+        }
       }
     }, 3000);
     return () => clearInterval(timer);
+  };
+
+  // 登记/自动注销一个轮询；卸载时统一清空。
+  const trackPoll = (requestId, onDone) => {
+    const token = { cancel: null };
+    token.cancel = pollAssist(requestId, (entry) => {
+      pollsRef.current.delete(token.cancel);
+      onDone(entry);
+    });
+    pollsRef.current.add(token.cancel);
   };
 
   const applyTopologyChanges = async () => {
@@ -1175,7 +1434,7 @@ function Studio({ connection, sessionId, language }) {
           requestId,
           draftFlow,
           baseTopology: topologyProjection(baseFlow),
-          ...(assistModel ? { model: assistModel } : {}),
+          ...(assistModel ? { model: assistModel, ...(assistProvider ? { provider: assistProvider } : {}) } : {}),
           ...(assistEffort ? { reasoningEffort: assistEffort } : {})
         }
       });
@@ -1192,8 +1451,10 @@ function Studio({ connection, sessionId, language }) {
         setMessage(accepted?.alreadyPersisted ? t.topologyAlreadyPersisted : t.topologyNoChanges);
         return;
       }
+      if (topologyPollRef.current) pollsRef.current.delete(topologyPollRef.current);
       topologyPollRef.current?.();
       topologyPollRef.current = pollAssist(requestId, (entry) => {
+        pollsRef.current.delete(topologyPollRef.current);
         topologyPollRef.current = null;
         setTopologyApplyBusy(false);
         if (entry.status !== "done" || !entry.result?.flow) {
@@ -1219,6 +1480,7 @@ function Studio({ connection, sessionId, language }) {
           setMessage(t.topologyAppliedWithNewDraft);
         }
       });
+      pollsRef.current.add(topologyPollRef.current);
     } catch (error) {
       setTopologyApplyBusy(false);
       setMessage(t.topologyApplyFailed + String(error));
@@ -1235,14 +1497,14 @@ function Studio({ connection, sessionId, language }) {
     setAssistantBusy("logic");
     try {
       const accepted = await remoteCall(connection, "dflow/assist", {
-        request: { sessionId, requestId, flow, mode: "logic", ...(assistModel ? { model: assistModel } : {}), ...(assistEffort ? { reasoningEffort: assistEffort } : {}) }
+        request: { sessionId, requestId, flow, mode: "logic", ...(assistModel ? { model: assistModel, ...(assistProvider ? { provider: assistProvider } : {}) } : {}), ...(assistEffort ? { reasoningEffort: assistEffort } : {}) }
       });
       if (!accepted?.accepted) throw new Error("assist not accepted");
-      pollTimerRef.current?.();
-      pollTimerRef.current = pollAssist(requestId, (entry) => {
+      trackPoll(requestId, (entry) => {
         if (entry.status === "cancelled") {
           setMessage(t.assistantCancelled);
         } else if (entry.status === "done" && entry.result) {
+          validationStoreRef.current.set(flowId, entry.result);
           setValidationResult(entry.result);
           setFindingFilter(null);
           setMessage(t.validationComplete);
@@ -1275,11 +1537,10 @@ function Studio({ connection, sessionId, language }) {
     setAssistantDraft("");
     try {
       const accepted = await remoteCall(connection, "dflow/assist", {
-        request: { sessionId, requestId: agentRequestId, flow, mode: "optimize", target, instruction: assistantInstruction, ...(assistModel ? { model: assistModel } : {}), ...(assistEffort ? { reasoningEffort: assistEffort } : {}) }
+        request: { sessionId, requestId: agentRequestId, flow, mode: "optimize", target, instruction: assistantInstruction, ...(assistModel ? { model: assistModel, ...(assistProvider ? { provider: assistProvider } : {}) } : {}), ...(assistEffort ? { reasoningEffort: assistEffort } : {}) }
       });
       if (!accepted?.accepted) throw new Error("assist not accepted");
-      pollTimerRef.current?.();
-      pollTimerRef.current = pollAssist(agentRequestId, (entry) => {
+      trackPoll(agentRequestId, (entry) => {
         if (entry.status === "cancelled") {
           if (assistantTargetRef.current === target) setMessage(t.assistantCancelled);
         } else if (entry.status === "done" && entry.result) {
@@ -1418,13 +1679,12 @@ function Studio({ connection, sessionId, language }) {
           flow,
           mode: "optimize-workflow",
           instruction: assistantInstruction,
-          ...(assistModel ? { model: assistModel } : {}),
+          ...(assistModel ? { model: assistModel, ...(assistProvider ? { provider: assistProvider } : {}) } : {}),
           ...(assistEffort ? { reasoningEffort: assistEffort } : {})
         }
       });
       if (!accepted?.accepted) throw new Error("assist not accepted");
-      pollTimerRef.current?.();
-      pollTimerRef.current = pollAssist(agentRequestId, (entry) => applyWorkflowOptimization(entry, {
+      trackPoll(agentRequestId, (entry) => applyWorkflowOptimization(entry, {
         requestId: agentRequestId,
         flow,
         sourceRevision,
@@ -1538,13 +1798,24 @@ function Studio({ connection, sessionId, language }) {
         return;
       }
       if (!editingText && event.key === "Escape") {
+        // ESC 分层退出：先关最上层的弹窗/菜单，全部关完才清空画布选中，
+        // 避免开着分支选择器按 ESC 时把背后的节点选中状态也悄悄清掉。
+        if (assistMenuOpen) { setAssistMenuOpen(false); return; }
+        if (connectionWarning) { setConnectionWarning(null); return; }
+        if (pendingConnection) { setPendingConnection(null); return; }
+        if (gatePickerOpen) { setGatePickerOpen(false); return; }
+        if (cancelConfirm) { setCancelConfirm(null); return; }
+        if (workflowOptimizeConfirm) { setWorkflowOptimizeConfirm(false); return; }
+        if (deleteFlowConfirm && !deleteFlowBusy) { setDeleteFlowConfirm(false); return; }
+        if (switchFlowTarget) { setSwitchFlowTarget(null); return; }
+        if (topologyApplyConfirm && !topologyApplyBusy) { setTopologyApplyConfirm(false); return; }
         setSelected(null);
         setSelectedEdge(null);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [redoGraph, removeSelectedEdge, save, selected, selectedEdge, undoGraph]);
+  }, [assistMenuOpen, cancelConfirm, connectionWarning, deleteFlowBusy, deleteFlowConfirm, gatePickerOpen, pendingConnection, redoGraph, removeSelectedEdge, save, selected, selectedEdge, switchFlowTarget, topologyApplyBusy, topologyApplyConfirm, undoGraph, workflowOptimizeConfirm]);
 
   const addBar = React.createElement("div", { className: "df-addbar" },
     React.createElement("span", { className: "df-node__kind", style: { alignSelf: "center", color: "var(--df-ink-2)" } }, t.addNode),
@@ -1563,6 +1834,15 @@ function Studio({ connection, sessionId, language }) {
     React.createElement("button", { className: "df-btn is-ghost", onClick: () => fileRef.current?.click() }, t.importLabel),
     React.createElement("input", { ref: fileRef, type: "file", accept: ".json,application/json", className: "df-import-hidden", onChange: onImportFile }),
     React.createElement("button", { className: "df-btn is-ghost", onClick: exportJson, disabled: currentId === null }, t.exportLabel),
+    React.createElement("button", {
+      className: "df-btn is-ghost",
+      "data-df-action": "delete-flow",
+      title: t.deleteFlowLabel,
+      "aria-label": t.deleteFlowLabel,
+      style: { color: "var(--df-err)" },
+      disabled: currentId === null || topologyApplyBusy,
+      onClick: () => setDeleteFlowConfirm(true)
+    }, t.deleteFlowLabel),
     React.createElement("button", { className: "df-btn", onClick: save, disabled: currentId === null || !dirty }, t.save),
     React.createElement("button", { className: "df-btn df-iconbtn is-ghost", title: `${t.undo} · Ctrl/Cmd+Z`, "aria-label": t.undo, onClick: undoGraph }, "↶"),
     React.createElement("button", { className: "df-btn df-iconbtn is-ghost", title: `${t.redo} · Ctrl/Cmd+Shift+Z`, "aria-label": t.redo, onClick: redoGraph }, "↷"),
@@ -1655,7 +1935,27 @@ function Studio({ connection, sessionId, language }) {
             React.createElement("input", { value: String(selectedNode.data.label ?? ""), onChange: (e) => patchSelected({ label: e.target.value }) })
           ),
           React.createElement("label", { key: "doc" }, t.docFile,
-            React.createElement("input", { value: currentFlow?.docs?.[selected] ?? "", placeholder: "01-step/STEP.md", onChange: (e) => patchDoc(e.target.value) })
+            React.createElement("input", {
+              value: docPathDraft ?? String(currentFlow?.docs?.[selected] ?? ""),
+              placeholder: "01-step/STEP.md",
+              onChange: (event) => setDocPathDraft(event.target.value),
+              onBlur: () => {
+                if (docPathDraft === null) return;
+                const next = docPathDraft;
+                setDocPathDraft(null);
+                if (next !== String(currentFlow?.docs?.[selected] ?? "")) patchDoc(next);
+              },
+              onKeyDown: (event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  event.target.blur();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  setDocPathDraft(null);
+                  event.target.blur();
+                }
+              }
+            })
           ),
           selectedNode.data.kind === "condition" &&
             React.createElement("label", { key: "gateType" }, t.gateTypeLabel,
@@ -1744,7 +2044,7 @@ function Studio({ connection, sessionId, language }) {
     React.createElement("div", { className: "df-assistant__head" },
       React.createElement("span", { className: "df-assistant__spark", "aria-hidden": true }, "✦"),
       React.createElement("span", { className: "df-assistant__title" }, t.assistant),
-      React.createElement("div", { className: "df-assist-menu-wrap" },
+      React.createElement("div", { className: "df-assist-menu-wrap", ref: assistMenuRef },
         React.createElement("button", {
           type: "button",
           className: "df-assist-menu-btn",
@@ -1769,13 +2069,13 @@ function Studio({ connection, sessionId, language }) {
             : assistMenuPage === "model"
               ? [
                   React.createElement("button", { key: "back", type: "button", className: "df-assist-menu-back", onClick: () => setAssistMenuPage(null) }, "‹ ", t.assistModelLabel),
-                  React.createElement("button", { key: "follow", type: "button", className: "df-assist-menu-item", onClick: () => { setAssistModel(""); setAssistMenuOpen(false); } }, t.assistModelFollow),
+                  React.createElement("button", { key: "follow", type: "button", className: "df-assist-menu-item", onClick: () => { setAssistModel(""); setAssistProvider(null); setAssistMenuOpen(false); } }, t.assistModelFollow),
                   ...(assistModelOptions ?? []).map((option) =>
                     React.createElement("button", {
                       key: `${option.provider}/${option.model}`,
                       type: "button",
                       className: "df-assist-menu-item",
-                      onClick: () => { setAssistModel(option.model); setAssistMenuOpen(false); }
+                      onClick: () => { setAssistModel(option.model); setAssistProvider(option.provider ?? null); setAssistMenuOpen(false); }
                     }, option.model)
                   )
                 ]
@@ -1917,7 +2217,7 @@ function Studio({ connection, sessionId, language }) {
       React.createElement("h3", { id: "df-workflow-optimize-title" }, t.workflowOptimizeTitle),
       React.createElement("p", null, t.workflowOptimizeWarning),
       React.createElement("div", { className: "df-confirm__actions" },
-        React.createElement("button", { className: "df-btn", onClick: () => setWorkflowOptimizeConfirm(false) }, t.workflowOptimizeCancel),
+        React.createElement("button", { className: "df-btn", autoFocus: true, onClick: () => setWorkflowOptimizeConfirm(false) }, t.workflowOptimizeCancel),
         React.createElement("button", { className: "df-btn is-primary", "data-df-action": "confirm-optimize-workflow", onClick: runWorkflowOptimization }, t.workflowOptimizeConfirm)
       )
     )
@@ -1936,7 +2236,7 @@ function Studio({ connection, sessionId, language }) {
           : cancelConfirm.mode === "workflow" ? t.cancelConfirmWorkflow
           : t.cancelConfirmDoc),
       React.createElement("div", { className: "df-confirm__actions" },
-        React.createElement("button", { className: "df-btn", "data-df-action": "wait-cancel", onClick: () => setCancelConfirm(null) }, t.waitMore),
+        React.createElement("button", { className: "df-btn", "data-df-action": "wait-cancel", autoFocus: true, onClick: () => setCancelConfirm(null) }, t.waitMore),
         React.createElement("button", {
           className: "df-btn is-primary",
           "data-df-action": "confirm-cancel-agent",
@@ -1971,6 +2271,7 @@ function Studio({ connection, sessionId, language }) {
           className: "df-btn is-primary",
           "data-df-action": "confirm-apply-topology",
           disabled: topologyApplyBusy,
+          autoFocus: true,
           onClick: applyTopologyChanges
         }, topologyApplyBusy ? t.topologyApplying : t.topologyApplyConfirm)
       )
@@ -2049,7 +2350,51 @@ function Studio({ connection, sessionId, language }) {
       React.createElement("h3", { id: "df-connection-warning-title" }, t.connectionWarningTitle),
       React.createElement("p", null, connectionWarning),
       React.createElement("div", { className: "df-confirm__actions" },
-        React.createElement("button", { className: "df-btn is-primary", onClick: () => setConnectionWarning(null) }, t.dismiss)
+        React.createElement("button", { className: "df-btn is-primary", autoFocus: true, onClick: () => setConnectionWarning(null) }, t.dismiss)
+      )
+    )
+  );
+
+  const deleteFlowConfirmDialog = deleteFlowConfirm && currentFlow && React.createElement("div", {
+    className: "df-confirm-backdrop",
+    role: "presentation",
+    onPointerDown: (event) => {
+      if (event.target === event.currentTarget && !deleteFlowBusy) setDeleteFlowConfirm(false);
+    }
+  },
+    React.createElement("div", { className: "df-confirm", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "df-delete-flow-title" },
+      React.createElement("h3", { id: "df-delete-flow-title" }, t.deleteFlowTitle + String(currentFlow.name ?? currentFlow.id)),
+      React.createElement("p", null, currentFlow.sessionId ? t.deleteFlowWarningOwned : t.deleteFlowWarningShared),
+      React.createElement("div", { className: "df-confirm__actions" },
+        React.createElement("button", { className: "df-btn", autoFocus: true, disabled: deleteFlowBusy, onClick: () => setDeleteFlowConfirm(false) }, t.cancel),
+        React.createElement("button", {
+          className: "df-btn is-primary",
+          "data-df-action": "confirm-delete-flow",
+          style: { background: "var(--df-err)", borderColor: "var(--df-err)" },
+          disabled: deleteFlowBusy,
+          onClick: deleteCurrentFlow
+        }, deleteFlowBusy ? t.deleteFlowBusyLabel : t.deleteFlowConfirm)
+      )
+    )
+  );
+
+  const switchFlowConfirmDialog = switchFlowTarget && React.createElement("div", {
+    className: "df-confirm-backdrop",
+    role: "presentation",
+    onPointerDown: (event) => {
+      if (event.target === event.currentTarget) setSwitchFlowTarget(null);
+    }
+  },
+    React.createElement("div", { className: "df-confirm", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "df-switch-flow-title" },
+      React.createElement("h3", { id: "df-switch-flow-title" }, t.switchFlowTitle),
+      React.createElement("p", null, t.switchFlowWarning),
+      React.createElement("div", { className: "df-confirm__actions" },
+        React.createElement("button", { className: "df-btn", autoFocus: true, onClick: () => setSwitchFlowTarget(null) }, t.cancel),
+        React.createElement("button", {
+          className: "df-btn is-primary",
+          "data-df-action": "confirm-switch-flow",
+          onClick: discardAndSwitchFlow
+        }, t.switchFlowConfirm)
       )
     )
   );
@@ -2145,6 +2490,8 @@ function Studio({ connection, sessionId, language }) {
     React.createElement("div", { className: "df-canvas-shell", ref: canvasShellRef },
       hiddenAgentFinalizeButton,
       workflowConfirmDialog,
+      switchFlowConfirmDialog,
+      deleteFlowConfirmDialog,
       cancelConfirmDialog,
       topologyConfirmDialog,
       gatePickerDialog,
@@ -2183,6 +2530,12 @@ function Studio({ connection, sessionId, language }) {
           zoomInLabel: t.zoomIn,
           zoomOutLabel: t.zoomOut
         }),
+        flows.length === 0 && React.createElement("div", { className: "df-empty-flow", "aria-live": "polite" },
+          React.createElement("div", { className: "df-empty-flow__card" },
+            React.createElement("strong", null, t.noFlow),
+            React.createElement("span", null, t.emptyFlowHint)
+          )
+        ),
         topologyApplyButton
       ),
       addBar,

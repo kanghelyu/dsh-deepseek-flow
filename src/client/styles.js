@@ -46,6 +46,9 @@ export const styles = String.raw`
 .df-graph__controls button{width:32px;height:30px;border:0;border-bottom:1px solid var(--df-border);background:var(--df-layer-2);color:var(--df-ink);font-weight:750}
 .df-graph__controls button:last-child{border-bottom:0}
 .df-graph__controls button:hover{background:color-mix(in srgb,var(--df-brand) 10%,var(--df-layer-2));color:var(--df-brand)}
+.df-empty-flow{position:absolute;inset:0;z-index:6;display:grid;place-items:center;padding:24px;pointer-events:none}
+.df-empty-flow__card{max-width:430px;padding:22px 26px;border:1px dashed var(--df-border-strong);border-radius:14px;background:var(--df-layer);color:var(--df-ink-2);font-size:12px;line-height:1.7;text-align:center;box-shadow:0 10px 30px color-mix(in srgb,var(--df-ink) 10%,transparent)}
+.df-empty-flow__card strong{display:block;margin-bottom:6px;color:var(--df-ink);font-size:13px}
 .df-topology-apply{position:absolute;z-index:14;right:18px;bottom:18px;display:flex;filter:drop-shadow(0 10px 22px color-mix(in srgb,var(--df-ink) 20%,transparent))}
 .deepseek-flow-root .df-topology-apply>.df-btn{min-height:42px;display:inline-flex;align-items:center;gap:8px;padding:8px 13px;border-radius:12px}
 .df-topology-apply__icon{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:color-mix(in srgb,var(--df-on-brand) 20%,transparent);font-size:12px;font-weight:850}
@@ -112,7 +115,6 @@ export const styles = String.raw`
 .df-assistant__head{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:7px 14px}
 .df-assistant__spark{width:27px;height:27px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--df-brand) 12%,var(--df-layer));color:var(--df-brand);font-weight:800}
 .df-assistant__title{font-size:11px;font-weight:750;color:var(--df-ink);white-space:nowrap}
-.df-assistant__safe{font-size:9px;color:var(--df-ink-2);white-space:nowrap}
 .df-assistant__target{max-width:190px;padding:3px 8px;border:1px solid var(--df-border);border-radius:999px;color:var(--df-ink-2);font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .df-assist-menu-wrap{position:relative;display:flex;align-items:center;flex:none}
  .deepseek-flow-root .df-assist-menu-btn{display:inline-flex;align-items:center;gap:4px;max-width:170px;border:1px solid var(--df-border-strong);border-radius:999px;background:var(--df-layer-2);color:var(--df-ink);padding:2px 8px;font-size:9px;line-height:1.35;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -173,6 +175,6 @@ export const styles = String.raw`
 [data-conversation-scroll][data-deepseek-flow-immersive="true"]>[data-composer-seat]{display:none!important}
 [data-conversation-scroll][data-deepseek-flow-immersive="true"]>:not([data-composer-seat]){flex:1 1 0;min-height:0;height:100%}
 [data-conversation-scroll][data-deepseek-flow-immersive="true"] .deepseek-flow-root{height:100%;min-height:0}
-@media(max-width:1180px){.df-status{display:none}.df-assistant__safe{display:none}.df-assistant__target{max-width:120px}.df-titlebar__note{display:none}}
+@media(max-width:1180px){.df-status{display:none}.df-assistant__target{max-width:120px}.df-titlebar__note{display:none}}
 @media(max-width:760px){.df-toolbar{padding:7px}.df-assistant__head{padding:7px;overflow-x:auto}.df-assistant__target{display:none}.df-assistant__body{grid-template-columns:1fr;overflow:auto;overscroll-behavior:contain}.df-assistant__control{min-height:150px}.df-findings{height:auto;min-height:80px}.df-assistant__preview{display:flex;min-height:210px}.df-assistant__head .df-btn{padding:4px 6px}.df-assistant__title{display:none}.df-tabs{padding:0 10px}.df-titlebar__badge{display:none}.df-topology-apply{right:10px;bottom:10px}.df-topology-summary{grid-template-columns:1fr}}
 `;

@@ -1,6 +1,6 @@
 {
   "name": "deepseek-flow",
-  "version": "0.3.17",
+  "version": "0.3.20",
   "description": "DeepSeek Flow — Markdown-first visual workflow plugin for DeepSeek Harness with executable Boolean gate semantics, two-way canvas sync, and AI review/optimization.",
   "license": "MIT",
   "repository": {
@@ -67,7 +67,7 @@
     "deps:check": "bash scripts/ensure-deps.sh",
     "test": "node --test test/*.test.mjs",
     "smoke": "node scripts/client-smoke.mjs",
-    "check": "node --check lib/index.js && node --check lib/document-workflow.js && node --check lib/dflow-store.js && node --check lib/flow-validation.js && node --check lib/logic-semantics.js && node --check lib/topology-model.js && node --check lib/topology-review.js && node --check lib/workspace-lifecycle.js && node --check lib/agent-assistant.js && node --check src/client/entry.js && node --check src/client/graph-canvas.js && node --check src/client/graph-model.js && node --check src/client/i18n.js && node --check src/client/styles.js && node --test test/*.test.mjs && node scripts/build.mjs && node scripts/client-smoke.mjs"
+    "check": "node --check lib/index.js && node --check lib/ui-state.js && node --check lib/document-workflow.js && node --check lib/dflow-store.js && node --check lib/flow-validation.js && node --check lib/logic-semantics.js && node --check lib/topology-model.js && node --check lib/topology-review.js && node --check lib/workspace-lifecycle.js && node --check lib/agent-assistant.js && node --check src/client/entry.js && node --check src/client/graph-canvas.js && node --check src/client/graph-model.js && node --check src/client/i18n.js && node --check src/client/styles.js && node --test test/*.test.mjs && node scripts/build.mjs && node scripts/client-smoke.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",

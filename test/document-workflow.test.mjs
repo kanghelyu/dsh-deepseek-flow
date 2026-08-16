@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -214,4 +215,17 @@ test("bundled debug and quality workflow resolves every Markdown step", async ()
   assert.match(loaded.nodes.find((node) => node.id === "debug").data.prompt, /关键路径|状态截图/);
   assert.match(loaded.nodes.find((node) => node.id === "quality").data.prompt, /自动化测试/);
   assert.match(loaded.workflowContent, /质检不通过/);
+});
+
+test("writeFlowDocuments skips unchanged files to avoid SSD write amplification", async () => {
+  const { writeIfChanged } = documentWorkflowInternals;
+  const { mkdtemp, stat, writeFile } = await import("node:fs/promises");
+  const file = join(await mkdtemp(join(tmpdir(), "dflow-wic-")), "STEP.md");
+  await writeFile(file, "same\n", "utf8");
+  await new Promise((resolve) => setTimeout(resolve, 12));
+  const before = (await stat(file)).mtimeMs;
+  assert.equal(await writeIfChanged(file, "same\n"), false);
+  assert.equal((await stat(file)).mtimeMs, before);
+  assert.equal(await writeIfChanged(file, "changed\n"), true);
+  assert.notEqual((await stat(file)).mtimeMs, before);
 });
