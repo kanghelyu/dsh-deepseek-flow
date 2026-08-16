@@ -45,6 +45,35 @@ find_dsh_node_modules() {
 
 dsh_node_modules="$(find_dsh_node_modules || true)"
 
+# 防御：dsh-tools 是宿主运行时包（peerDependency），绝不允许嵌套实体副本存在。
+# 旧版按 dependencies 安装会留下实体副本，与 DSH 宿主内的正副本形成两个模块实例：
+# dsh-tools 用模块级局部 Symbol (TOOL_RUNTIME_SCHEDULER) 注册调度器，双实例时
+# Symbol 不同 → registry[Symbol] 为 undefined → 宿主全部工具调用崩溃。
+# 本脚本遵循「不删除」契约：只检测、拒绝继续，并给出精确的手动清理指引。
+nested_tools_link="node_modules/@deepseek-ai/dsh-tools"
+if [[ -d node_modules/.pnpm ]] && ls node_modules/.pnpm/@deepseek-ai+dsh-tools@* >/dev/null 2>&1; then
+  echo "[deepseek-flow] nested dsh-tools copy found in node_modules/.pnpm — this creates a duplicate module instance and breaks ALL host tool calls." >&2
+  echo "Fix: remove the store entry and the stale link, then rerun this script:" >&2
+  echo "  ${plugin_root}/node_modules/.pnpm/@deepseek-ai+dsh-tools@*" >&2
+  echo "  ${plugin_root}/${nested_tools_link}" >&2
+  exit 1
+fi
+if [[ -e "$nested_tools_link" && ! -L "$nested_tools_link" ]]; then
+  echo "[deepseek-flow] dsh-tools exists as a real directory (not a host symlink) — duplicate module instance breaks ALL host tool calls." >&2
+  echo "Fix: remove it, then rerun this script:" >&2
+  echo "  ${plugin_root}/${nested_tools_link}" >&2
+  exit 1
+fi
+if [[ -L "$nested_tools_link" ]]; then
+  real_target="$(readlink "$nested_tools_link")"
+  if [[ "$real_target" != "$dsh_node_modules/@deepseek-ai/dsh-tools" ]]; then
+    echo "[deepseek-flow] dsh-tools symlink points to $real_target (expected the DSH host copy). Duplicate instance risk." >&2
+    echo "Fix: remove the stale link, then rerun this script:" >&2
+    echo "  ${plugin_root}/${nested_tools_link}" >&2
+    exit 1
+  fi
+fi
+
 needs_mutation=0
 for path in "${registry_paths[@]}"; do
   [[ -f "$path" ]] || needs_mutation=1
