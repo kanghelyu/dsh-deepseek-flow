@@ -76,7 +76,7 @@ export function text(language) {
         zoomIn: "放大",
         zoomOut: "缩小",
         addNode: "新建流程框",
-        connectHint: "进入条件框的箭头提供真值输入；条件输出箭头传播门结果",
+        connectHint: "进入条件框的箭头提供真值输入；条件输出箭头传播门结果；选中箭头可配置有界反馈循环",
         nodeKind: {
           input: "输入",
           agent: "Agent",
@@ -209,7 +209,20 @@ export function text(language) {
         expandAssistant: "展开 AI 文档助手",
         collapseAssistant: "收起 AI 文档助手",
         assistantFailed: "操作失败：",
-        edgeSelected: "已选择箭头，按 Delete 删除"
+        edgeSelected: "已选择箭头，可配置反馈循环或按 Delete 删除",
+        edgeProperties: "箭头属性",
+        edgeRoute: "连线",
+        deleteEdge: "删除箭头",
+        feedbackLoop: "有界反馈循环",
+        feedbackLoopNote: "反馈箭头只表达当前 Session 控制的有限重试；它不参与单次布尔求值，也不会自动执行步骤。必须填写上限和退出条件。",
+        feedbackIterations: "最大重试次数",
+        feedbackExitCondition: "退出条件",
+        feedbackMake: "标记为反馈循环",
+        feedbackMakeOrdinary: "改为普通执行箭头",
+        feedbackConnect: "反馈连线",
+        feedbackConfigureRequired: "自环已创建为反馈循环；请填写退出条件后再应用修改。",
+        selfFeedbackRequired: "自环只能作为有界反馈循环创建。",
+        feedbackEdgeLabel: "反馈"
       }
     : {
         view: "DeepSeek Flow",
@@ -268,7 +281,7 @@ export function text(language) {
         zoomIn: "Zoom in",
         zoomOut: "Zoom out",
         addNode: "New flow box",
-        connectHint: "Incoming arrows provide truth inputs; condition outputs propagate the gate result",
+        connectHint: "Incoming arrows provide truth inputs; condition outputs propagate the gate result; select an arrow to configure bounded feedback",
         nodeKind: {
           input: "Input",
           agent: "Agent",
@@ -401,6 +414,19 @@ export function text(language) {
         expandAssistant: "Expand AI document assistant",
         collapseAssistant: "Collapse AI document assistant",
         assistantFailed: "Operation failed: ",
-        edgeSelected: "Arrow selected; press Delete to remove"
+        edgeSelected: "Arrow selected; configure bounded feedback or press Delete to remove",
+        edgeProperties: "Arrow properties",
+        edgeRoute: "Route",
+        deleteEdge: "Delete arrow",
+        feedbackLoop: "Bounded feedback loop",
+        feedbackLoopNote: "A feedback arrow describes finite retries controlled by the current Session. It is not part of one-pass Boolean evaluation and never runs steps automatically. Set a limit and an exit condition.",
+        feedbackIterations: "Maximum retry attempts",
+        feedbackExitCondition: "Exit condition",
+        feedbackMake: "Mark as feedback loop",
+        feedbackMakeOrdinary: "Make ordinary execution arrow",
+        feedbackConnect: "Feedback connection",
+        feedbackConfigureRequired: "The self-loop was created as feedback. Set its exit condition before applying changes.",
+        selfFeedbackRequired: "A self-loop can only be created as bounded feedback.",
+        feedbackEdgeLabel: "Retry"
       };
 }

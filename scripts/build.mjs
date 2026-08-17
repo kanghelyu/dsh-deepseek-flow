@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 const CLIENT_ENTRY = "src/client/entry.js";
 const OFFLINE_MODULES = [
   "lib/condition-gates.js",
+  "lib/graph-analysis.js",
   "lib/logic-semantics.js",
   "lib/topology-model.js",
   "src/client/i18n.js",

@@ -4,14 +4,18 @@ import { resolve } from "node:path";
 import { chromium } from "playwright";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
-const outputDir = resolve(root, process.argv[2] ?? "qa");
+const serveOnly = process.argv.includes("--serve");
+const portIndex = process.argv.indexOf("--port");
+const requestedPort = portIndex >= 0 ? Number(process.argv[portIndex + 1]) : 3101;
+const outputArgument = process.argv.find((argument, index) => index > 1 && !argument.startsWith("--") && process.argv[index - 1] !== "--port");
+const outputDir = resolve(root, outputArgument ?? "qa");
 const tempDir = resolve(root, "qa/.tmp");
 await mkdir(outputDir, { recursive: true });
 await mkdir(tempDir, { recursive: true });
 process.env.TMPDIR = tempDir;
 
-const source = await readFile(resolve(root, "src/client/entry.js"), "utf8");
-const stylesMatch = source.match(/const styles = String\.raw`([\s\S]*?)`;\n/);
+const stylesSource = await readFile(resolve(root, "src/client/styles.js"), "utf8");
+const stylesMatch = stylesSource.match(/export const styles = String\.raw`([\s\S]*?)`;\n/);
 if (!stylesMatch) throw new Error("Unable to extract DeepSeekFlow styles");
 const pluginStyles = stylesMatch[1];
 
@@ -30,33 +34,38 @@ const nodeSpecs = [
 const edgeSpecs = [
   ["input", "research"], ["research", "plan"], ["plan", "build"], ["build", "review"],
   ["review", "qa", "是"], ["review", "fix", "否"], ["fix", "qa"],
-  ["qa", "deliver"], ["deliver", "archive"], ["archive", "output"]
+  ["qa", "deliver"], ["deliver", "archive"], ["archive", "output"],
+  ["qa", "fix", "反馈 3", true]
 ];
 const byId = new Map(nodeSpecs.map((node) => [node[0], node]));
 const esc = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
-function edgePath(sourceId, targetId) {
+function edgePath(sourceId, targetId, feedback = false) {
   const sourceNode = byId.get(sourceId);
   const targetNode = byId.get(targetId);
   const sx = sourceNode[3] + 208;
   const sy = sourceNode[4] + 58;
   const tx = targetNode[3];
   const ty = targetNode[4] + 58;
-  const bend = Math.max(54, Math.abs(tx - sx) * 0.46);
+  const reverse = feedback || tx < sx;
+  const bend = reverse ? Math.max(108, Math.abs(tx - sx) * 0.56) : Math.max(54, Math.abs(tx - sx) * 0.46);
+  const lift = reverse ? -72 : 0;
   return {
-    d: `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`,
+    d: reverse
+      ? `M ${sx} ${sy} C ${sx + bend} ${sy + lift}, ${tx - bend} ${ty + lift}, ${tx} ${ty}`
+      : `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`,
     x: (sx + tx) / 2,
-    y: (sy + ty) / 2
+    y: (sy + ty) / 2 + lift / 2
   };
 }
 
 function graphMarkup() {
-  const edges = edgeSpecs.map(([sourceId, targetId, label], index) => {
-    const geometry = edgePath(sourceId, targetId);
-    return `<g class="df-graph__edge-group" data-edge-id="edge-${index + 1}"><path class="df-graph__edge" d="${geometry.d}" marker-end="url(#df-arrow-qa)"></path><path class="df-graph__edge-hit" d="${geometry.d}"></path>${label ? `<g transform="translate(${geometry.x} ${geometry.y})"><rect class="df-graph__label-bg" x="-18" y="-10" width="36" height="20" rx="7"></rect><text class="df-graph__label" x="0" y="1">${label}</text></g>` : ""}</g>`;
+  const edges = edgeSpecs.map(([sourceId, targetId, label, feedback], index) => {
+    const geometry = edgePath(sourceId, targetId, feedback);
+    return `<g class="df-graph__edge-group" data-edge-id="edge-${index + 1}"><path class="df-graph__edge${feedback ? " is-feedback" : ""}" d="${geometry.d}" marker-end="url(#df-arrow-qa)"></path><path class="df-graph__edge-hit" d="${geometry.d}"></path>${label ? `<g transform="translate(${geometry.x} ${geometry.y})"><rect class="df-graph__label-bg" x="-24" y="-10" width="48" height="20" rx="7"></rect><text class="df-graph__label" x="0" y="1">${label}</text></g>` : ""}</g>`;
   }).join("");
   const nodes = nodeSpecs.map(([id, kind, label, x, y]) => `<div class="df-graph__node" data-node-id="${id}" style="left:${x}px;top:${y}px"><div class="df-node df-node--${kind}"><div class="df-node__kind">${kind.toUpperCase()}</div><div class="df-node__label">${esc(label)}</div><div class="df-node__prompt">完成“${esc(label)}”，记录输入、输出、失败回退与验收标准。</div><div class="df-node__file">${id}/STEP.md</div></div><button class="df-graph__handle df-graph__handle--target" data-df-target-id="${id}" aria-label="connect in"></button><button class="df-graph__handle df-graph__handle--source" data-df-source-id="${id}" aria-label="connect out"></button></div>`).join("");
-  return `<div class="df-canvas"><div class="df-graph__stage" style="transform:translate(38px,92px) scale(.43)"><svg class="df-graph__edges" width="1" height="1" aria-label="Workflow arrows"><defs><marker id="df-arrow-qa" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth" viewBox="0 0 10 10"><path d="M 0 0 L 10 5 L 0 10 Z" fill="var(--df-brand)"></path></marker></defs>${edges}</svg>${nodes}</div><div class="df-graph__controls"><button>+</button><button>−</button><button>⊙</button></div></div>`;
+  return `<div class="df-canvas"><div class="df-graph__stage" style="transform:translate(38px,126px) scale(.25)"><svg class="df-graph__edges" width="1" height="1" aria-label="Workflow arrows"><defs><marker id="df-arrow-qa" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth" viewBox="0 0 10 10"><path d="M 0 0 L 10 5 L 0 10 Z" fill="var(--df-brand)"></path></marker></defs>${edges}</svg>${nodes}</div><div class="df-graph__controls"><button>+</button><button>−</button><button>⊙</button></div></div>`;
 }
 
 function documentRail(collapsed) {
@@ -66,7 +75,7 @@ function documentRail(collapsed) {
 
 function inspector(collapsed) {
   if (collapsed) return `<aside class="df-inspector is-collapsed"></aside>`;
-  return `<aside class="df-inspector"><h3>WORKFLOW.md</h3><div class="df-node__kind" style="color:var(--df-brand)">文档优先</div><div class="df-pathbox"><span class="df-pathbox__label">文档工作区</span><span class="df-pathbox__value">/qa/math-workspace/flow-docs</span></div><label>Markdown 内容<textarea class="df-markdown-editor"># 数学科普动画工作流\n\n按箭头顺序读取每个 STEP.md。\n\n## 验收\n\n- 暗色与亮色界面均清晰\n- 截图质检后再交付</textarea></label></aside>`;
+  return `<aside class="df-inspector"><div class="df-inspector__scroll"><h3>箭头属性</h3><div class="df-pathbox"><span class="df-pathbox__label">连线</span><span class="df-pathbox__value">截图质检 -> 修复建议</span></div><div class="df-advanced__content"><strong>有界反馈循环</strong><span style="color:var(--df-ink-2);font-size:12px">反馈箭头只表达当前 Session 控制的有限重试；它不参与单次布尔求值，也不会自动执行步骤。</span><label>最大重试次数<input type="number" min="1" max="1000" value="3"></label><label>退出条件<textarea>截图和质量检查全部通过</textarea></label></div></div></aside>`;
 }
 
 function assistant(collapsed) {
@@ -91,9 +100,13 @@ const server = createServer((request, response) => {
   response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
   response.end(html(theme, narrow));
 });
-await new Promise((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+await new Promise((resolvePromise) => server.listen(serveOnly ? requestedPort : 0, "127.0.0.1", resolvePromise));
 const address = server.address();
 const base = `http://127.0.0.1:${address.port}`;
+if (serveOnly) {
+  console.log(`DeepSeek Flow visual QA preview: ${base}`);
+  await new Promise(() => {});
+}
 const browser = await chromium.launch({ headless: true, executablePath: process.env.DF_CHROMIUM_PATH || chromium.executablePath() });
 
 async function inspect(page) {

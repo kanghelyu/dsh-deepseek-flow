@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { gateBranchForEdge, normalizeGateType } from "../../lib/condition-gates.js";
+import { isFeedbackEdge } from "../../lib/graph-analysis.js";
 import { branchDisplayLabel } from "./graph-model.js";
 
 function FlowNode({ data, selected, copy }) {
@@ -31,19 +32,46 @@ function connectionTargetAt(clientX, clientY) {
   return element?.closest?.("[data-df-connect-target-id]")?.getAttribute("data-df-connect-target-id") ?? null;
 }
 
-function graphEdgeGeometry(edge, byId) {
+function feedbackLane(edges, edge) {
+  if (!isFeedbackEdge(edge)) return 0;
+  return Math.max(0, edges.filter(isFeedbackEdge).indexOf(edge));
+}
+
+function graphEdgeGeometry(edge, byId, lane = 0) {
   const source = byId.get(edge.source);
   const target = byId.get(edge.target);
   if (!source || !target) return null;
   const start = { x: source.position.x + GRAPH_NODE_WIDTH, y: source.position.y + GRAPH_NODE_HEIGHT / 2 };
   const end = { x: target.position.x, y: target.position.y + GRAPH_NODE_HEIGHT / 2 };
-  const forward = Math.max(54, Math.abs(end.x - start.x) * 0.46);
-  const bend = end.x >= start.x ? forward : Math.max(90, forward * 0.7);
+  if (edge.source === edge.target) {
+    const loopX = source.position.x + GRAPH_NODE_WIDTH + 72 + lane * 24;
+    const loopY = source.position.y - 58 - lane * 20;
+    return {
+      start,
+      end,
+      bounds: { minX: source.position.x, minY: loopY, maxX: loopX, maxY: source.position.y + GRAPH_NODE_HEIGHT },
+      label: { x: loopX + 4, y: loopY + 12 },
+      path: `M ${start.x} ${start.y} C ${loopX} ${start.y}, ${loopX} ${loopY}, ${source.position.x + GRAPH_NODE_WIDTH / 2} ${loopY} C ${source.position.x - 32} ${loopY}, ${source.position.x - 32} ${end.y}, ${end.x} ${end.y}`
+    };
+  }
+  const reverse = end.x < start.x || isFeedbackEdge(edge);
+  const bend = reverse
+    ? Math.max(108, Math.abs(end.x - start.x) * 0.56) + lane * 28
+    : Math.max(54, Math.abs(end.x - start.x) * 0.46) + lane * 16;
+  const lift = reverse ? -72 - lane * 28 : lane * 12;
   return {
     start,
     end,
-    label: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 },
-    path: `M ${start.x} ${start.y} C ${start.x + bend} ${start.y}, ${end.x - bend} ${end.y}, ${end.x} ${end.y}`
+    bounds: {
+      minX: Math.min(start.x, end.x, start.x - (reverse ? bend : 0)),
+      minY: Math.min(start.y, end.y, start.y + lift, end.y + lift),
+      maxX: Math.max(start.x, end.x, start.x + bend),
+      maxY: Math.max(start.y, end.y, start.y + lift, end.y + lift)
+    },
+    label: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 + lift / 2 },
+    path: reverse
+      ? `M ${start.x} ${start.y} C ${start.x + bend} ${start.y + lift}, ${end.x - bend} ${end.y + lift}, ${end.x} ${end.y}`
+      : `M ${start.x} ${start.y} C ${start.x + bend} ${start.y}, ${end.x - bend} ${end.y}, ${end.x} ${end.y}`
   };
 }
 
@@ -148,10 +176,21 @@ export function GraphCanvas({
     const requestedIds = new Set((options.nodes ?? []).map((node) => typeof node === "string" ? node : node?.id).filter(Boolean));
     const visibleNodes = requestedIds.size > 0 ? nodes.filter((node) => requestedIds.has(node.id)) : nodes;
     if (visibleNodes.length === 0) return;
-    const minX = Math.min(...visibleNodes.map((node) => node.position.x));
-    const minY = Math.min(...visibleNodes.map((node) => node.position.y));
-    const maxX = Math.max(...visibleNodes.map((node) => node.position.x + GRAPH_NODE_WIDTH));
-    const maxY = Math.max(...visibleNodes.map((node) => node.position.y + GRAPH_NODE_HEIGHT));
+    const selectedNodeIds = new Set(visibleNodes.map((node) => node.id));
+    const bounds = visibleNodes.map((node) => ({
+      minX: node.position.x,
+      minY: node.position.y,
+      maxX: node.position.x + GRAPH_NODE_WIDTH,
+      maxY: node.position.y + GRAPH_NODE_HEIGHT
+    }));
+    edges.filter((edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)).forEach((edge) => {
+      const geometry = graphEdgeGeometry(edge, new Map(visibleNodes.map((node) => [node.id, node])), feedbackLane(edges, edge));
+      if (geometry?.bounds) bounds.push(geometry.bounds);
+    });
+    const minX = Math.min(...bounds.map((bound) => bound.minX));
+    const minY = Math.min(...bounds.map((bound) => bound.minY));
+    const maxX = Math.max(...bounds.map((bound) => bound.maxX));
+    const maxY = Math.max(...bounds.map((bound) => bound.maxY));
     const paddingRatio = Number(options.padding ?? 0.16);
     const padding = Math.max(36, Math.min(rect.width, rect.height) * paddingRatio);
     const minZoom = Number(options.minZoom ?? GRAPH_MIN_ZOOM);
@@ -164,7 +203,7 @@ export function GraphCanvas({
       y: (rect.height - graphHeight * zoom) / 2 - minY * zoom,
       zoom
     }, options.duration);
-  }, [animateViewport]);
+  }, [animateViewport, edges]);
 
   const focusNode = useCallback((id, options = {}) => {
     const rect = rootRef.current?.getBoundingClientRect();
@@ -299,7 +338,7 @@ export function GraphCanvas({
       const target = connectionTargetAt(next.clientX, next.clientY);
       const connection = { source, target, sourceHandle: null, targetHandle: null };
       if (target) {
-        if (isValidConnection?.(connection) ?? true) onConnect?.(connection);
+        if (target === source || (isValidConnection?.(connection) ?? true)) onConnect?.(connection);
         else onConnectionRejected?.(connection);
       }
       setConnectionDraft(null);
@@ -349,16 +388,18 @@ export function GraphCanvas({
 
   const edgeElements = [];
   for (const edge of edges) {
-    const geometry = graphEdgeGeometry(edge, byId);
+    const geometry = graphEdgeGeometry(edge, byId, feedbackLane(edges, edge));
     if (!geometry) continue;
     const selected = selectedEdge === edge.id;
-    const displayLabel = edge.autoLogicLabel
-      ? branchDisplayLabel(gateBranchForEdge(edge), copy)
-      : edge.label;
+    const displayLabel = isFeedbackEdge(edge)
+      ? `${copy.feedbackEdgeLabel} ${edge.feedback?.maxIterations ?? "?"}`
+      : edge.autoLogicLabel
+        ? branchDisplayLabel(gateBranchForEdge(edge), copy)
+        : edge.label;
     edgeElements.push(
       React.createElement("g", { key: edge.id, className: "df-graph__edge-group", "data-edge-id": edge.id },
         React.createElement("path", {
-          className: `df-graph__edge${selected ? " is-selected" : ""}`,
+          className: `df-graph__edge${isFeedbackEdge(edge) ? " is-feedback" : ""}${selected ? " is-selected" : ""}`,
           d: geometry.path,
           markerEnd: `url(#${markerIdRef.current})`
         }),

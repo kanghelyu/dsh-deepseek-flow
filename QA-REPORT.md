@@ -48,13 +48,15 @@
 | Client 文案、样式、画布、图模型与入口编排已按职责拆分 | 通过 |
 | 图转换、持久化、连线限制与布局拥有直接单元测试 | 通过 |
 | 无 node_modules 环境可将全部 Client 模块离线构建为单一 bundle | 通过 |
-| flow_create 使用稳定 step id + connections 直接生成无环分支图 | 通过 |
+| flow_create 使用稳定 step id + connections 直接生成普通无环分支图，并支持带上限和退出条件的反馈边 | 通过 |
 | 同层执行顺序按 data.order、画布 x/y、数组下标依次决定 | 通过 |
 | flow/JSON 优先写入；磁盘优先必须显式选择 | 通过 |
 | generated STEP 目录随 label/顺序变化，旧目录进入可恢复回收区 | 通过 |
 | flow_delete 归档插件托管工作区，外部 docRoot 保持不动 | 通过 |
 | 单进程并发写入串行化，旧 revision 保存被明确拒绝 | 通过 |
-| 环路继续拒绝并返回有界重试/终止分支建模建议 | 通过 |
+| 普通无界环拒绝；显式反馈边要求有限次数、退出条件和闭环普通路径 | 通过 |
+| JSON 工具参数同时接受原生值与 Web GUI 字符串化 JSON，错误形状明确拒绝 | 通过 |
+| 首次安装缺少旧 harness-flow 状态文件只记录无需迁移，不报 ENOENT 错误 | 通过 |
 | 多条校验错误按行编号显示 | 通过 |
 | 仅拓扑变化时右下角出现“应用修改”，Markdown-only 修改不触发 | 通过（纯 topology signature/diff 测试） |
 | 保存、Ctrl/Cmd+S、自动同步和 AI 文档优化均不能旁路写入拓扑草稿 | 通过（源码契约与 document-only merge 测试） |

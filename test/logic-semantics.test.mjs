@@ -135,6 +135,27 @@ test("IF/ELSE selects exactly the matching truth branch", () => {
   assert.deepEqual(evaluateFlowLogic(flow, { input: false }).activeTargets, ["no"]);
 });
 
+test("logic evaluation ignores explicit feedback edges while exposing their bounded policy", () => {
+  const flow = aggregateFlow();
+  flow.edges.push({
+    id: "retry",
+    source: "publish",
+    target: "all",
+    feedback: { maxIterations: 2, exitCondition: "the published result is accepted" }
+  });
+  const result = evaluateFlowLogic(flow, { a: true, b: true });
+  assert.deepEqual(result.activeTargets, ["publish"]);
+  assert.deepEqual(result.feedbackLoops, [{
+    edgeId: "retry",
+    source: "publish",
+    target: "all",
+    maxIterations: 2,
+    exitCondition: "the published result is accepted"
+  }]);
+  assert.equal(result.conditions.all.operands.length, 2);
+  assert.deepEqual(logicExecutionContract(flow).feedbackLoops, result.feedbackLoops);
+});
+
 test("the exported contract contains formulas, operands, predicates and output modes", () => {
   const contract = logicExecutionContract(aggregateFlow());
   assert.equal(contract.version, 1);

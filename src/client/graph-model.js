@@ -5,6 +5,7 @@ import {
   normalizeGateType,
   validateGateBranch
 } from "../../lib/condition-gates.js";
+import { isFeedbackEdge, stableTopologicalOrder } from "../../lib/graph-analysis.js";
 
 export function branchDisplayLabel(branch, copy) {
   return copy?.branchLabel?.[branch] ?? String(branch ?? "");
@@ -19,7 +20,7 @@ export function flowToCanvasNodes(flow, positionOverrides) {
       ...node.data,
       kind: node.kind,
       ...(node.kind === "condition"
-        ? { gateType: conditionGateType(node, (flow?.edges ?? []).filter((edge) => edge.source === node.id)) }
+        ? { gateType: conditionGateType(node, (flow?.edges ?? []).filter((edge) => edge.source === node.id && !isFeedbackEdge(edge))) }
         : {}),
       docPath: flow?.docs?.[node.id] ?? ""
     }
@@ -55,7 +56,11 @@ export function serializeFlow(currentFlow, nodes, edges) {
       target: edge.target,
       ...(!edge.autoLogicLabel && edge.label ? { label: edge.label } : {}),
       ...(edge.sourceHandle === null || edge.sourceHandle === undefined ? {} : { sourceHandle: edge.sourceHandle }),
-      ...(edge.targetHandle === null || edge.targetHandle === undefined ? {} : { targetHandle: edge.targetHandle })
+      ...(edge.targetHandle === null || edge.targetHandle === undefined ? {} : { targetHandle: edge.targetHandle }),
+      ...(edge.feedback === undefined ? {} : { feedback: {
+        maxIterations: edge.feedback?.maxIterations,
+        exitCondition: edge.feedback?.exitCondition
+      } })
     })),
     inputs: serializedNodes.filter((node) => node.kind === "input").map((node) => node.id),
     outputs: serializedNodes.filter((node) => node.kind === "output").map((node) => node.id)
@@ -64,15 +69,16 @@ export function serializeFlow(currentFlow, nodes, edges) {
 
 export function connectionProblem(nodes, edges, connection, branch = null) {
   if (!connection?.source || !connection?.target) return { valid: false, code: "invalidConnection" };
-  if (connection.source === connection.target) return { valid: false, code: "invalidConnection" };
+  const feedback = connection.feedback !== undefined;
+  if (connection.source === connection.target && !feedback) return { valid: false, code: "selfFeedbackRequired" };
   if (edges.some((edge) => edge.source === connection.source && edge.target === connection.target && edge.id !== connection.edgeId)) {
     return { valid: false, code: "duplicateConnection" };
   }
   const sourceNode = nodes.find((node) => node.id === connection.source);
   const targetNode = nodes.find((node) => node.id === connection.target);
   if (!sourceNode || !targetNode) return { valid: false, code: "invalidConnection" };
-  if (sourceNode.data?.kind !== "condition") return { valid: true, code: "ok" };
-  const outgoing = edges.filter((edge) => edge.source === connection.source);
+  if (feedback || sourceNode.data?.kind !== "condition") return { valid: true, code: "ok" };
+  const outgoing = edges.filter((edge) => edge.source === connection.source && !isFeedbackEdge(edge));
   const gateType = conditionGateType(sourceNode, outgoing);
   const available = availableGateBranches(gateType, outgoing, connection.edgeId ?? null);
   if (branch === null || branch === undefined) {
@@ -90,6 +96,7 @@ export function connectionProblemMessage(problem, copy) {
   if (problem.code === "gateLimit" || problem.code === "notFull") return copy.notFull;
   if (problem.code === "branchUsed") return copy.branchUsed;
   if (problem.code === "logicMismatch") return copy.gateMismatch;
+  if (problem.code === "selfFeedbackRequired") return copy.selfFeedbackRequired;
   return copy.invalidConnection;
 }
 
@@ -102,34 +109,18 @@ export function reconnectFlowEdge(oldEdge, connection, edges) {
     ...edge,
     source: connection.source,
     target: connection.target,
-    sourceHandle: connection.sourceHandle ?? null,
-    targetHandle: connection.targetHandle ?? null
+    ...(isFeedbackEdge(edge)
+      ? { sourceHandle: null, targetHandle: null }
+      : { sourceHandle: connection.sourceHandle ?? null, targetHandle: connection.targetHandle ?? null })
   } : edge);
 }
 
 export function layoutNodes(nodes, edges) {
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const indegree = new Map(nodes.map((node) => [node.id, 0]));
-  const outgoing = new Map(nodes.map((node) => [node.id, []]));
-  for (const edge of edges) {
-    if (!byId.has(edge.source) || !byId.has(edge.target)) continue;
-    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
-    outgoing.get(edge.source).push(edge.target);
-  }
-  const queue = nodes.filter((node) => indegree.get(node.id) === 0).map((node) => node.id);
-  const level = new Map(queue.map((id) => [id, 0]));
-  const order = [];
-  while (queue.length) {
-    const id = queue.shift();
-    order.push(id);
-    for (const next of outgoing.get(id) ?? []) {
-      level.set(next, Math.max(level.get(next) ?? 0, (level.get(id) ?? 0) + 1));
-      indegree.set(next, (indegree.get(next) ?? 0) - 1);
-      if (indegree.get(next) === 0) queue.push(next);
-    }
-  }
+  const analysis = stableTopologicalOrder(nodes, edges);
+  const level = analysis.depth;
+  const fallbackLevel = Math.max(0, ...level.values()) + 1;
   nodes.forEach((node, index) => {
-    if (!level.has(node.id)) level.set(node.id, Math.max(0, order.length ? Math.max(...level.values()) + 1 : index));
+    if (!level.has(node.id)) level.set(node.id, fallbackLevel + index);
   });
   const rows = new Map();
   return nodes.map((node) => {
@@ -160,7 +151,8 @@ export function logicSnapshot(flow) {
       source: edge.source,
       target: edge.target,
       sourceHandle: gateBranchForEdge(edge) ?? "",
-      targetHandle: edge.targetHandle ?? ""
+      targetHandle: edge.targetHandle ?? "",
+      feedback: edge.feedback ?? null
     }))
   });
 }

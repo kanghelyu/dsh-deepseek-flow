@@ -105,7 +105,7 @@ Harness 的 `skills` 服务就绪后，插件会响应式注册 Skill。包内 `
 | **XOR / XNOR** | 可连多个不同目标，标签自动生成。 | 计算奇偶性；XNOR 对 XOR 取反。 |
 | **NOT** | 只允许一条自动标注的出线。 | 对唯一输入取反。 |
 
-重复目标、重复“是/否”分支、超量 IF/ELSE 或 NOT 出线、聚合门输入数量错误、环路和未知节点类型都会被拒绝，并返回可操作的校验信息。旧版 true/false 分支会自动归一化为 IF/ELSE。
+重复目标、重复“是/否”分支、超量 IF/ELSE 或 NOT 出线、聚合门输入数量错误、未标记的环路和未知节点类型都会被拒绝，并返回可操作的校验信息。有限重试只能使用显式反馈边：`feedback: { maxIterations, exitCondition }`；上限必须有限且为正整数，退出条件不能为空，反馈边必须闭合一条从 target 回到 source 的普通执行路径。反馈边不参与单次布尔门求值，也不会自动执行 Agent 步骤。旧版 true/false 分支会自动归一化为 IF/ELSE。
 
 `flow_evaluate` 工具可根据上游步骤结果确定性计算门状态和激活目标；它不会运行 Agent 步骤，也不会产生工作流副作用。
 
@@ -211,7 +211,7 @@ deepseek-flow/
 
 </details>
 
-当前质量保障包含 91 项自动化契约与行为测试，覆盖图转换、revision 锁、文档生命周期、拓扑审查、隐藏定稿、布尔语义、连线校验、Agent 任务与生成后的 Client bundle。更多信息见[代码质量说明](CODE-QUALITY.md)和[质检报告](QA-REPORT.md)。
+当前质量保障包含自动化契约与行为测试，覆盖图转换、有界反馈循环、revision 锁、文档生命周期、拓扑审查、隐藏定稿、布尔语义、连线校验、Agent 任务、JSON 工具参数归一化与生成后的 Client bundle。更多信息见[代码质量说明](CODE-QUALITY.md)和[质检报告](QA-REPORT.md)。
 
 ## 常见问题
 
@@ -219,7 +219,7 @@ deepseek-flow/
 - **界面还是旧版：**执行 `npm run build`；Host 有变化时重启服务，并对浏览器进行硬刷新。
 - **AI 操作提示没有可用 provider：**先在 Session 或助手菜单中选择可用模型。
 - **整工作流优化被拒绝写入：**通常是 Agent 工作期间原文发生变化，或 Agent 没有返回全部必需文档。请基于最新文件重试。
-- **应用修改被拒绝：**按提示修复环路、缺失输入、分支上限或过期 revision，再提交完整拓扑。
+- **应用修改被拒绝：**有限重试应使用带正整数 `maxIterations` 和非空 `exitCondition` 的反馈边；其他情况按提示修复普通环路、缺失输入、分支上限或过期 revision，再提交完整拓扑。
 - **Session 改完文件后仍短暂出现“应用修改”：**等待 Studio 的文件来源兜底判定，或让 Agent 使用工作流 id 和当前 revision 调用 `flow_finalize_canvas`。
 - **Skill 工具返回空正文：**更新插件并重启 `dsh web`；当前版本已内置合法的 `skills/deepseek-flow/SKILL.md`，并会在 `skills` 服务就绪后注册。
 - **删除的工作流想找回：**托管工作区保存在 `deepseek-flow/trash/<日期>/`，把目录复制回 `workspaces/` 即可恢复文档；flow 定义可用导出的 JSON 重新 `flow_put` 导入。

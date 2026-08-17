@@ -62,6 +62,8 @@ test("condition boxes choose a gate first and enforce labeled outgoing branches"
   assert.match(client, /t\.logicInputs/);
   assert.match(client, /onConnectionRejected/);
   assert.match(client, /gateChangeBlocked/);
+  assert.match(client, /feedbackConnectionMode/);
+  assert.match(client, /feedbackConnect/);
   assert.match(client, /autoLogicLabel/);
   assert.match(client, /sourceHandle: branch/);
   assert.match(client, /t\.gateTypeLabel/);
@@ -111,7 +113,10 @@ test("current Session can read the complete flow and evaluate gates without runn
   assert.match(host, /workflowContent/);
   assert.match(host, /orderedNodeIds\(flow\)/);
   assert.match(host, /Use logicContract or flow_evaluate/);
-  assert.match(host, /evaluateFlowLogic\(stored, args\.values\)/);
+  assert.match(host, /evaluateFlowLogic\(stored, requiredJsonObject\(args, "values"\)\)/);
+  assert.match(host, /optionalJsonArray\(args, "steps"\)/);
+  assert.match(host, /optionalJsonArray\(args, "connections"\)/);
+  assert.match(host, /optionalJsonObject\(args, "flow"\)/);
 });
 
 test("bottom assistant manually delegates validation and optimization to a one-shot Agent", () => {

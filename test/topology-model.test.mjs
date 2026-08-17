@@ -44,6 +44,16 @@ test("topology signatures ignore Markdown and node positions, but detect boxes, 
   assert.deepEqual(diff.edges.added, ["e2"]);
 });
 
+test("topology signatures preserve bounded feedback policy and reviewed topology", () => {
+  const flow = flowFixture();
+  flow.edges.push({ id: "retry", source: "output", target: "input", feedback: { maxIterations: 2, exitCondition: "accepted" } });
+  const changed = structuredClone(flow);
+  changed.edges.at(-1).feedback.maxIterations = 3;
+  assert.notEqual(topologySignature(flow), topologySignature(changed));
+  const rebuilt = applyReviewedTopology(flow, flow, topologyProjection(changed));
+  assert.deepEqual(rebuilt.edges.at(-1).feedback, { maxIterations: 3, exitCondition: "accepted" });
+});
+
 test("Markdown auto-save keeps persisted topology and documents for draft-removed nodes", () => {
   const saved = flowFixture();
   const editor = structuredClone(saved);

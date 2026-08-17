@@ -105,7 +105,7 @@ Condition boxes support eight gate types: **IF/ELSE, AND, OR, NOT, NAND, NOR, XO
 | **XOR / XNOR** | Multiple distinct targets; labels are automatic. | Evaluates parity, with XNOR negating XOR. |
 | **NOT** | Exactly one automatically labeled outgoing arrow. | Negates its single input. |
 
-Duplicate targets, duplicate Yes/No branches, excess IF/ELSE or NOT arrows, invalid aggregate input arity, cycles, and unknown box kinds are rejected with actionable validation messages. Legacy true/false branches are normalized to IF/ELSE.
+Duplicate targets, duplicate Yes/No branches, excess IF/ELSE or NOT arrows, invalid aggregate input arity, unmarked cycles, and unknown box kinds are rejected with actionable validation messages. A retry loop is allowed only as an explicit feedback edge with a finite `maxIterations` and a non-empty `exitCondition`; feedback edges do not participate in one-pass Boolean evaluation or automatic Agent execution. Legacy true/false branches are normalized to IF/ELSE.
 
 The `flow_evaluate` tool can deterministically evaluate gate state and activated targets from upstream step results. It does not run Agent steps or perform workflow side effects.
 
@@ -211,7 +211,7 @@ deepseek-flow/
 
 </details>
 
-Quality safeguards include 91 automated contract and behavior tests covering graph conversion, revision locking, document lifecycle, topology review, hidden finalization, Boolean semantics, connection validation, Agent jobs, and the generated client bundle. See [Code quality notes](CODE-QUALITY.md) and [QA report](QA-REPORT.md) for more detail.
+Quality safeguards include automated contract and behavior tests covering graph conversion, bounded feedback loops, revision locking, document lifecycle, topology review, hidden finalization, Boolean semantics, connection validation, Agent jobs, JSON tool-argument normalization, and the generated client bundle. See [Code quality notes](CODE-QUALITY.md) and [QA report](QA-REPORT.md) for more detail.
 
 ## Troubleshooting
 
@@ -219,7 +219,7 @@ Quality safeguards include 91 automated contract and behavior tests covering gra
 - **The UI looks stale:** rebuild with `npm run build`, restart when Host code changed, and hard-refresh the browser.
 - **AI actions report no provider:** select a working model in the Session or in the assistant menu.
 - **Whole-workflow optimization is rejected:** one or more documents changed while the Agent was working, or the Agent did not return every required document. Retry from the latest files.
-- **Apply changes is rejected:** fix the reported cycle, missing input, branch limit, or stale revision, then submit the complete topology again.
+- **Apply changes is rejected:** for a retry, add a feedback edge with a finite `maxIterations` and non-empty `exitCondition`; otherwise fix the reported ordinary cycle, missing input, branch limit, or stale revision, then submit the complete topology again.
 - **Apply changes appears after a Session file edit:** wait briefly for Studio's file-origin fallback, or ask the Agent to call `flow_finalize_canvas` with the workflow id and current revision.
 - **The Skill tool returns an empty body:** update the plugin and restart `dsh web`; current releases bundle a valid `skills/deepseek-flow/SKILL.md` and register it after the `skills` service is ready.
 - **Recovering a deleted workflow:** managed workspaces are kept under `deepseek-flow/trash/<date>/`; copy the directory back into `workspaces/` to restore the documents, then re-import the flow JSON with `flow_put`.

@@ -91,6 +91,17 @@ test("serialization removes view-only fields and preserves gate semantics", () =
   });
 });
 
+test("feedback serialization retains retry policy and keeps layout deterministic", () => {
+  const feedback = { id: "retry", source: "b", target: "a", feedback: { maxIterations: 3, exitCondition: "approved" } };
+  const serialized = serializeFlow({ id: "loop", docs: {} }, [canvasNode("a"), canvasNode("b")], [
+    { id: "forward", source: "a", target: "b" },
+    feedback
+  ]);
+  assert.deepEqual(serialized.edges.at(-1), feedback);
+  const laidOut = layoutNodes([canvasNode("a"), canvasNode("b")], serialized.edges);
+  assert.deepEqual(laidOut.map((node) => node.position), [{ x: 70, y: 90 }, { x: 315, y: 90 }]);
+});
+
 test("connection validation centralizes duplicates, branch limits, and warnings", () => {
   const nodes = [
     canvasNode("condition", "condition", "ifElse"),
@@ -110,6 +121,16 @@ test("connection validation centralizes duplicates, branch limits, and warnings"
   ], { source: "condition", target: "extra" });
   assert.equal(full.code, "ifElseFull");
   assert.equal(connectionProblemMessage(full, copy), "分支已满");
+
+  const feedback = connectionProblem(nodes, [
+    yesEdge,
+    { id: "no-edge", source: "condition", target: "no", sourceHandle: "false" }
+  ], {
+    source: "condition",
+    target: "extra",
+    feedback: { maxIterations: 2, exitCondition: "done" }
+  });
+  assert.equal(feedback.valid, true);
 });
 
 test("graph helpers keep reconnects immutable and layout deterministic", () => {

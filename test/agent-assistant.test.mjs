@@ -37,6 +37,20 @@ test("logic Agent prompt contains every Markdown document and graph edge", () =>
   assert.match(prompt, /Do not run the workflow/);
 });
 
+test("logic Agent prompt keeps feedback policy separate from condition branches", () => {
+  const flow = flowFixture();
+  flow.nodes[0] = { id: "gate", kind: "condition", data: { label: "Gate", gateType: "not" } };
+  flow.nodes[1] = { id: "work", kind: "agent", data: { label: "Work", prompt: "WORK_ONLY" } };
+  flow.docs = { gate: "gate/STEP.md", work: "work/STEP.md" };
+  flow.edges = [
+    { id: "gate-work", source: "gate", target: "work", sourceHandle: "not" },
+    { id: "retry", source: "work", target: "gate", feedback: { maxIterations: 2, exitCondition: "accepted" } }
+  ];
+  const prompt = buildLogicPrompt(flow);
+  assert.match(prompt, /"feedback":\{"maxIterations":2,"exitCondition":"accepted"\}/);
+  assert.equal((prompt.match(/"branch":"not"/g) ?? []).length, 1);
+});
+
 test("single-document Agent prompt includes only the selected Markdown content", () => {
   const prompt = buildOptimizePrompt(flowFixture(), "input", "保留标题");
   assert.match(prompt, /INPUT_ONLY/);

@@ -16,7 +16,7 @@ description: >-
 - `flow_create` 和 `flow_put` 成功即代表拓扑已经持久化。不要再要求用户去画布点“应用修改”，也不要把同一拓扑再次送回主 Session 审核；Studio 会按 revision 自动同步。
 - 如果你没有用 `flow_put`，而是直接编辑现有工作流的 `WORKFLOW.md`、`STEP.md` 或相关定义文件，并且修改会改变节点、逻辑门或箭头，完成文件修改后必须调用 `flow_finalize_canvas`，传入工作流 `id`（建议同时传入修改前 `flow_read` 得到的 `expected_revision`）。它会让 Studio 自动触发一个用户不可见的定稿动作，只做确定性校验并直接保存，不再把相同修改交给主 Session。
 - 即使漏掉 `flow_finalize_canvas`，Studio 也会检查拓扑是否经过画布 UI 编辑事件：没有画布编辑事件的外部文件拓扑会自动走同一隐藏定稿通道。用户在画布上手工新增、删除、改门或连线的草稿不会走此通道，仍保留“应用修改”审核。
-- 流程必须无环。重试请建模为有界重试步骤或失败终止分支，并在 Markdown 里写明策略。
+- 普通执行箭头必须无环。需要重试时可以添加显式反馈边：`{"source":"review","target":"implement","feedback":{"maxIterations":3,"exitCondition":"质量检查通过"}}`。反馈边必须有 1–1000 的整数上限和非空退出条件；它不参与单次布尔门求值，也不会自动执行步骤，当前 Session 必须按 WORKFLOW.md 控制每轮重试。
 
 ## 逻辑门的硬规则
 
@@ -76,7 +76,8 @@ description: >-
 | 报错关键词 | 原因 | 修复 |
 | --- | --- | --- |
 | revision changed | 更新前文件被别人写过 | 重新 `flow_read` 取最新 revision 再提交；确要覆盖时才用 `force: true` |
-| cycle detected | 连线成环 | 把重试建模为有界重试步骤或失败终止分支 |
+| cycle detected in ordinary execution edges | 普通箭头形成无界环 | 仅将真实有限重试回边标记为 `feedback:{maxIterations,exitCondition}`；其他普通箭头保持无环 |
+| feedback edge | 反馈边缺少上限、退出条件或不能闭合普通执行路径 | 设置 1–1000 的整数 `maxIterations`、非空 `exitCondition`，并确认 target 可以沿普通箭头回到 source |
 | reuses true/false branch | IF/ELSE 同一分支连了两个目标 | 每个分支只能连一个目标；聚合用 AND/OR 等门 |
 | requires at least two incoming | 聚合门输入不足 | AND/OR/NAND/NOR/XOR/XNOR 至少两条入边 |
 | unsupported predicate | predicate 写了自然语言 | 只能写 truthy/falsy/nonEmpty；语义判断先让上游 Agent 输出 Boolean |

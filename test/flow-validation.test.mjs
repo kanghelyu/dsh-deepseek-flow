@@ -29,15 +29,48 @@ test("a complete acyclic branch graph validates and produces deterministic level
   assert.deepEqual(result.levels, [["input"], ["route"], ["no", "yes"], ["output"]]);
 });
 
-test("cycles stay rejected with an actionable bounded-retry alternative", () => {
+test("ordinary cycles stay rejected until the return edge is explicit bounded feedback", () => {
   const flow = baseFlow();
   flow.edges.push({ id: "retry", source: "yes", target: "route" });
   assert.throws(
     () => validateFlow(flow),
     (error) => error instanceof FlowValidationError
-      && /cycle detected/.test(error.message)
-      && /bounded retry step/.test(error.message)
+      && /ordinary execution edges/.test(error.message)
+      && /maxIterations and exitCondition/.test(error.message)
   );
+
+  flow.edges.at(-1).feedback = { maxIterations: 3, exitCondition: "the review passes" };
+  const result = validateFlow(flow);
+  assert.deepEqual(result.order, ["input", "route", "no", "yes", "output"]);
+});
+
+test("feedback loops require a bounded policy and a real executable return path", () => {
+  const flow = baseFlow();
+  flow.edges.push({ id: "retry", source: "yes", target: "route", feedback: { maxIterations: 0, exitCondition: "" } });
+  assert.throws(() => validateFlow(flow), (error) => {
+    assert.match(error.message, /maxIterations must be an integer/);
+    assert.match(error.message, /exitCondition must be a non-empty string/);
+    return true;
+  });
+
+  flow.edges.at(-1).feedback = { maxIterations: 2, exitCondition: "review passes" };
+  assert.doesNotThrow(() => validateFlow(flow));
+
+  for (const key of ["sourceHandle", "branch", "logic"]) {
+    const branched = structuredClone(flow);
+    branched.edges.at(-1)[key] = "true";
+    assert.throws(() => validateFlow(branched), /cannot carry a condition branch/);
+  }
+
+  const disconnected = baseFlow();
+  disconnected.edges.push({ id: "not-a-loop", source: "input", target: "no", feedback: { maxIterations: 2, exitCondition: "done" } });
+  assert.throws(() => validateFlow(disconnected), /must close an executable path/);
+});
+
+test("a bounded self-feedback edge is valid and does not make the executable graph cyclic", () => {
+  const flow = baseFlow();
+  flow.edges.push({ id: "self-retry", source: "yes", target: "yes", feedback: { maxIterations: 2, exitCondition: "work is complete" } });
+  assert.doesNotThrow(() => validateFlow(flow));
 });
 
 test("validation reports multiple graph issues on separate readable lines", () => {

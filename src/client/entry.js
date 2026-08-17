@@ -9,6 +9,7 @@ import {
   gateBranchForEdge,
   normalizeGateType
 } from "../../lib/condition-gates.js";
+import { isFeedbackEdge } from "../../lib/graph-analysis.js";
 import { LOGIC_PREDICATES, gateRule } from "../../lib/logic-semantics.js";
 import {
   mergeDocumentEdits,
@@ -124,6 +125,7 @@ function Studio({ connection, sessionId, language }) {
   const [flowInstance, setFlowInstance] = useState(null);
   const [gatePickerOpen, setGatePickerOpen] = useState(false);
   const [pendingConnection, setPendingConnection] = useState(null);
+  const [feedbackConnectionMode, setFeedbackConnectionMode] = useState(false);
   const [connectionWarning, setConnectionWarning] = useState(null);
   const [assistantOpen, setAssistantOpen] = useState(() => storedBoolean("deepseek-flow:assistant-open", false));
   const [assistantHeight, setAssistantHeight] = useState(() => storedNumber("deepseek-flow:assistant-height", ASSISTANT_DEFAULT));
@@ -665,6 +667,7 @@ function Studio({ connection, sessionId, language }) {
       }, currentDraftFlow)
     : null, [currentDraftFlow, persistedTopologySignature]);
   const selectedNode = useMemo(() => nodes.find((n) => n.id === selected) ?? null, [nodes, selected]);
+  const selectedFlowEdge = useMemo(() => edges.find((edge) => edge.id === selectedEdge) ?? null, [edges, selectedEdge]);
 
   const selectFlow = async (id) => {
     if (id === currentId) return;
@@ -854,7 +857,7 @@ function Studio({ connection, sessionId, language }) {
 
   const selectedConditionInputs = selectedNode?.data?.kind === "condition"
     ? edges
-        .filter((edge) => edge.target === selectedNode.id)
+        .filter((edge) => edge.target === selectedNode.id && !isFeedbackEdge(edge))
         .map((edge) => {
           const source = nodes.find((node) => node.id === edge.source);
           return { edgeId: edge.id, sourceId: edge.source, label: source?.data?.label ?? edge.source };
@@ -974,7 +977,8 @@ function Studio({ connection, sessionId, language }) {
       ...conn,
       id: `e-${Math.random().toString(36).slice(2, 9)}`,
       type: "workflow",
-      ...(condition ? {
+      ...(conn.feedback === undefined ? {} : { feedback: conn.feedback }),
+      ...(condition && conn.feedback === undefined ? {
         sourceHandle: branch,
         label: branchDisplayLabel(branch, t),
         autoLogicLabel: true
@@ -991,7 +995,22 @@ function Studio({ connection, sessionId, language }) {
   }, [markCanvasTopologyEdit, rememberGraph, setEdges, showConnectionWarning, t]);
 
   const onConnect = useCallback((conn) => {
-    const problem = connectionProblem(nodesRef.current, edgesRef.current, conn);
+    const feedback = feedbackConnectionMode || conn.source === conn.target;
+    const feedbackConnection = feedback ? { ...conn, feedback: { maxIterations: 3, exitCondition: "" } } : conn;
+    const problem = connectionProblem(nodesRef.current, edgesRef.current, feedbackConnection);
+    if (feedback) {
+      if (!problem.valid) {
+        showConnectionWarning(problem);
+        return;
+      }
+      commitConnection(feedbackConnection);
+      setSelected(null);
+      setSelectedEdge(edgesRef.current.at(-1)?.id ?? null);
+      setActiveDoc("edge");
+      setFeedbackConnectionMode(false);
+      setMessage(t.feedbackConfigureRequired);
+      return;
+    }
     if (!problem.valid) {
       showConnectionWarning(problem);
       return;
@@ -1001,17 +1020,19 @@ function Studio({ connection, sessionId, language }) {
       commitConnection(conn);
       return;
     }
-    const gateType = conditionGateType(sourceNode, edgesRef.current.filter((edge) => edge.source === conn.source));
+    const gateType = conditionGateType(sourceNode, edgesRef.current.filter((edge) => edge.source === conn.source && !isFeedbackEdge(edge)));
     if (gateType === "ifElse") {
       setPendingConnection({ connection: conn, available: problem.available ?? [] });
       return;
     }
     commitConnection(conn, gateType);
-  }, [commitConnection, showConnectionWarning]);
+  }, [commitConnection, feedbackConnectionMode, showConnectionWarning, t.feedbackConfigureRequired]);
 
   const onConnectionRejected = useCallback((conn) => {
-    showConnectionWarning(connectionProblem(nodesRef.current, edgesRef.current, conn));
-  }, [showConnectionWarning]);
+    const feedback = feedbackConnectionMode || conn.source === conn.target;
+    const candidate = feedback ? { ...conn, feedback: { maxIterations: 3, exitCondition: "" } } : conn;
+    showConnectionWarning(connectionProblem(nodesRef.current, edgesRef.current, candidate));
+  }, [feedbackConnectionMode, showConnectionWarning]);
 
   const onReconnect = useCallback((oldEdge, connectionParams) => {
     rememberGraph();
@@ -1028,8 +1049,10 @@ function Studio({ connection, sessionId, language }) {
   }, [markCanvasTopologyEdit, rememberGraph, setEdges, t]);
 
   const isValidConnection = useCallback((connectionParams) => {
-    return connectionProblem(nodesRef.current, edgesRef.current, connectionParams).valid;
-  }, []);
+    const feedback = feedbackConnectionMode || connectionParams.source === connectionParams.target;
+    const candidate = feedback ? { ...connectionParams, feedback: { maxIterations: 3, exitCondition: "" } } : connectionParams;
+    return connectionProblem(nodesRef.current, edgesRef.current, candidate).valid;
+  }, [feedbackConnectionMode]);
 
   const moveNode = useCallback((id, position) => {
     setNodes((items) => items.map((node) => node.id === id ? { ...node, position } : node));
@@ -1100,7 +1123,7 @@ function Studio({ connection, sessionId, language }) {
 
   const patchGateType = (gateType) => {
     if (!selectedNode || selectedNode.data.kind !== "condition") return;
-    if (edgesRef.current.some((edge) => edge.source === selectedNode.id)) {
+    if (edgesRef.current.some((edge) => edge.source === selectedNode.id && edge.feedback === undefined)) {
       showConnectionWarning(t.gateChangeBlocked);
       return;
     }
@@ -1152,6 +1175,42 @@ function Studio({ connection, sessionId, language }) {
     markCanvasTopologyEdit();
     setEdges((items) => items.filter((edge) => edge.id !== selectedEdge));
     setSelectedEdge(null);
+    ++documentRevisionRef.current;
+    setDirty(true);
+  }, [markCanvasTopologyEdit, rememberGraph, selectedEdge, setEdges]);
+
+  const patchSelectedEdgeFeedback = useCallback((patch) => {
+    if (!selectedEdge) return;
+    rememberGraph();
+    markCanvasTopologyEdit();
+    const nextEdges = edgesRef.current.map((edge) => {
+      if (edge.id !== selectedEdge) return edge;
+      const { sourceHandle, targetHandle, label, autoLogicLabel, ...feedbackEdge } = edge;
+      return {
+        ...feedbackEdge,
+        feedback: {
+          ...(edge.feedback ?? { maxIterations: 3, exitCondition: "" }),
+          ...patch
+        }
+      };
+    });
+    edgesRef.current = nextEdges;
+    setEdges(nextEdges);
+    ++documentRevisionRef.current;
+    setDirty(true);
+  }, [markCanvasTopologyEdit, rememberGraph, selectedEdge, setEdges]);
+
+  const clearSelectedEdgeFeedback = useCallback(() => {
+    if (!selectedEdge) return;
+    rememberGraph();
+    markCanvasTopologyEdit();
+    const nextEdges = edgesRef.current.map((edge) => {
+      if (edge.id !== selectedEdge) return edge;
+      const { feedback, ...ordinary } = edge;
+      return ordinary;
+    });
+    edgesRef.current = nextEdges;
+    setEdges(nextEdges);
     ++documentRevisionRef.current;
     setDirty(true);
   }, [markCanvasTopologyEdit, rememberGraph, selectedEdge, setEdges]);
@@ -1819,6 +1878,12 @@ function Studio({ connection, sessionId, language }) {
 
   const addBar = React.createElement("div", { className: "df-addbar" },
     React.createElement("span", { className: "df-node__kind", style: { alignSelf: "center", color: "var(--df-ink-2)" } }, t.addNode),
+    React.createElement("button", {
+      className: `df-btn${feedbackConnectionMode ? " is-primary" : ""}`,
+      title: t.feedbackConnect,
+      "aria-pressed": feedbackConnectionMode,
+      onClick: () => setFeedbackConnectionMode((value) => !value)
+    }, t.feedbackConnect),
     ["input", "agent", "mapAgent", "condition", "merge", "output"].map((kind) =>
       React.createElement("button", { key: kind, className: "df-btn", onClick: () => addNode(kind) }, t.nodeKind[kind])
     ),
@@ -1909,6 +1974,48 @@ function Studio({ connection, sessionId, language }) {
               spellCheck: false
             })
           )
+        ]
+      : selectedFlowEdge
+      ? [
+          React.createElement("h3", { key: "title" }, t.edgeProperties),
+          React.createElement("div", { key: "path", className: "df-pathbox" },
+            React.createElement("span", { className: "df-pathbox__label" }, t.edgeRoute),
+            React.createElement("span", { className: "df-pathbox__value" }, `${selectedFlowEdge.source} -> ${selectedFlowEdge.target}`)
+          ),
+          selectedFlowEdge.feedback
+            ? React.createElement("div", { key: "feedback", className: "df-advanced__content" },
+                React.createElement("strong", null, t.feedbackLoop),
+                React.createElement("span", { style: { color: "var(--df-ink-2)", fontSize: 12 } }, t.feedbackLoopNote),
+                React.createElement("label", null, t.feedbackIterations,
+                  React.createElement("input", {
+                    type: "number",
+                    min: 1,
+                    max: 1000,
+                    step: 1,
+                    value: String(selectedFlowEdge.feedback.maxIterations ?? 3),
+                    onChange: (event) => patchSelectedEdgeFeedback({ maxIterations: Number(event.target.value) })
+                  })
+                ),
+                React.createElement("label", null, t.feedbackExitCondition,
+                  React.createElement("textarea", {
+                    value: String(selectedFlowEdge.feedback.exitCondition ?? ""),
+                    onChange: (event) => patchSelectedEdgeFeedback({ exitCondition: event.target.value }),
+                    spellCheck: false
+                  })
+                ),
+                selectedFlowEdge.source !== selectedFlowEdge.target && React.createElement("button", {
+                  className: "df-btn is-ghost",
+                  onClick: clearSelectedEdgeFeedback
+                }, t.feedbackMakeOrdinary)
+              )
+            : React.createElement("div", { key: "ordinary", className: "df-advanced__content" },
+                React.createElement("span", { style: { color: "var(--df-ink-2)", fontSize: 12 } }, t.feedbackLoopNote),
+                React.createElement("button", {
+                  className: "df-btn",
+                  onClick: () => patchSelectedEdgeFeedback({ maxIterations: 3, exitCondition: "" })
+                }, t.feedbackMake)
+              ),
+          React.createElement("button", { key: "del", className: "df-btn", style: { color: "var(--df-err)" }, onClick: removeSelectedEdge }, t.deleteEdge)
         ]
       : selectedNode
       ? [
@@ -2516,6 +2623,7 @@ function Studio({ connection, sessionId, language }) {
           onEdgeSelect: (id) => {
             setSelected(null);
             setSelectedEdge(id);
+            setActiveDoc("edge");
             setMessage(t.edgeSelected);
           },
           onPaneClick: () => {

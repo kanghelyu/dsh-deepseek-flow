@@ -30,6 +30,7 @@ export const styles = String.raw`
 .df-graph__edges{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
 .df-graph__edge{fill:none!important;stroke:var(--df-brand);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 2px color-mix(in srgb,var(--df-brand) 36%,transparent));pointer-events:none}
 .df-graph__edge.is-selected{stroke-width:3.6;filter:drop-shadow(0 0 4px color-mix(in srgb,var(--df-brand) 58%,transparent))}
+.df-graph__edge.is-feedback{stroke:var(--df-warn);stroke-dasharray:8 5;filter:drop-shadow(0 0 2px color-mix(in srgb,var(--df-warn) 42%,transparent))}
 .df-graph__edge-hit{fill:none!important;stroke:transparent;stroke-width:18;vector-effect:non-scaling-stroke;pointer-events:stroke;cursor:pointer}
 .df-graph__connection{fill:none!important;stroke:var(--df-brand);stroke-width:2;stroke-dasharray:7 5;vector-effect:non-scaling-stroke;pointer-events:none}
 .df-graph__label-bg{fill:var(--df-layer);stroke:var(--df-border);stroke-width:1;vector-effect:non-scaling-stroke}

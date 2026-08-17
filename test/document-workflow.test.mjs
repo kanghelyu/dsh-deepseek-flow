@@ -144,6 +144,25 @@ test("flow_create refuses to fake an aggregate gate with a linear single input",
   }), /requires explicit connections from at least two upstream operands/);
 });
 
+test("bounded feedback loops preserve deterministic document order and render their policy", async () => {
+  const { root, flow } = await fixture();
+  const looped = {
+    ...flow,
+    edges: [...flow.edges, {
+      id: "retry",
+      source: "step-03",
+      target: "step-02",
+      feedback: { maxIterations: 3, exitCondition: "quality checks pass" }
+    }]
+  };
+  const written = await writeFlowDocuments(normalizeDocumentFlow(looped, { storageRoot: root, scope: "session-a" }));
+  const workflow = await readFile(join(written.docRoot, "WORKFLOW.md"), "utf8");
+  assert.deepEqual(orderedNodeIds(written), ["input", "step-01", "step-02", "step-03", "output"]);
+  assert.match(workflow, /## 有界反馈循环/);
+  assert.match(workflow, /最多 3 次/);
+  assert.match(workflow, /quality checks pass/);
+});
+
 test("generated WORKFLOW.md records executable gate formulas and input predicates", async () => {
   const testRoot = join(process.cwd(), ".test-tmp");
   await mkdir(testRoot, { recursive: true });
