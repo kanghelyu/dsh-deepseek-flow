@@ -1,6 +1,6 @@
 {
   "name": "deepseek-flow",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "DeepSeek Flow — Markdown-first visual workflow plugin for DeepSeek Harness with executable Boolean gate semantics, two-way canvas sync, and AI review/optimization.",
   "license": "MIT",
   "repository": {
@@ -40,6 +40,9 @@
     "docs/images",
     "README.md",
     "README.zh-CN.md",
+    "DEEPSEEKFLOW-GUIDE.md",
+    "DEEPSEEKFLOW-使用说明.md",
+    "CHANGELOG.md",
     "CODE-QUALITY.md",
     "LICENSE",
     "QA-REPORT.md",
@@ -88,6 +91,7 @@
     "@deepseek-ai/dsh-session": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-timeout": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-user-approval": "^0.1.0-rc.6",
     "esbuild": "^0.28.2",
     "playwright": "^1.62.1",

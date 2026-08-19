@@ -380,7 +380,7 @@ test("bundled skill always has a real body and teaches executable gate JSON", ()
   assert.match(body, /"predicate": "truthy"/);
   assert.match(body, /"branch": "true"/);
   assert.match(body, /"branch": "false"/);
-  assert.match(body, /不要再要求用户去画布点“应用修改”/);
+  assert.match(body, /Do \*\*not\*\* ask the user to click "Apply changes" in Studio/);
   assert.match(body, /flow_finalize_canvas/);
   assert.ok(manifest.files.includes("skills"));
   assert.match(host, /ctx\.inject\(\["skills"\]/);

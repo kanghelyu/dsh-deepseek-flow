@@ -85,13 +85,23 @@ my-workflow/
 | Tool | Purpose |
 | --- | --- |
 | `flow_create` | Create a documented linear or branched workflow and save it in the current Session. |
-| `flow_list` / `flow_read` | Discover workflows and read the master document, step documents, revision, graph, and logic contract. |
+| `flow_list` / `flow_read` | Discover workflows and read the master document, step documents, revision, graph, and logic contract. Both also return the session's `activeFlowId`, plus a one-shot `activeFlowNotice` after the user switches the active workflow in Studio — the agent should then run the switched workflow and ignore earlier instructions about other workflows; without a notice, keep the conversation seamless. |
 | `flow_put` | Import or atomically update a complete flow definition. A successful call is already persisted. |
 | `flow_evaluate` | Evaluate Boolean gates from upstream values without running Agent steps. |
 | `flow_finalize_canvas` | After direct file edits, queue Studio's invisible deterministic finalize action and skip a redundant main-Session review. |
 | `flow_delete` | Delete a Session flow or shared template; managed workspaces are moved to trash. |
 
 The Skill is registered reactively when the Harness `skills` service becomes available. Its `SKILL.md` contains real Markdown after frontmatter, so filesystem and runtime providers never return an empty instruction body.
+
+## Active workflow & cross-session switching
+
+The Studio toolbar's workflow dropdown lists **every historical workflow**, grouped by origin: current session first, other sessions next, shared templates last. Switching to another session's workflow imports an independent copy of its document workspace into the current session — external custom `docRoot`s are referenced, never copied. Shared templates are also copied into the current session's own managed workspace on switch, so edits never pollute the shared original.
+
+Each session persists an `activeFlowId` (the workflow last used in Studio) inside `sessions/<id>.json`. Reopening Studio auto-selects it, and because both the pointer and the history listing (`dflow/allFlows`) are read straight from disk, the dropdown stays fully populated after a `dsh web` restart or a machine reboot. A brand-new session starts with an empty canvas and a hint to pick a past workflow from the dropdown, import JSON, or ask the agent to create one.
+
+When the user switches workflows mid-conversation, the next `flow_list`/`flow_read` returns an `activeFlowNotice` instructing the agent to run the switched workflow instead of any earlier instruction. The notice fires exactly once; if the active workflow did not change, nothing is said and the conversation continues uninterrupted.
+
+`flow_create` accepts an optional `language` parameter (`"en"` or `"zh"`). The Agent should pass the user's current language so default names (`New Flow` / `新工作流`), default step labels, and default node labels are generated in the right language. The user can still override the name explicitly.
 
 ## Logic gates
 
@@ -217,6 +227,7 @@ Quality safeguards include automated contract and behavior tests covering graph 
 
 - **The tab does not appear:** verify the plugin with `dsh web --dump-config`, then restart the Web profile.
 - **The UI looks stale:** rebuild with `npm run build`, restart when Host code changed, and hard-refresh the browser.
+- **New `/api/dflow/*` endpoints return 404 and the history dropdown stays empty:** the Typert route table is snapshotted when the `dsh web` process starts. After a Host upgrade that adds remote methods (e.g. `allFlows`, `activate`), you must **fully restart the Web profile** — kill the process and start it again, not just a browser hard-refresh. Verify with `curl -X POST http://127.0.0.1:3080/api/dflow/allFlows -H 'Content-Type: application/json' -d '{"args":{}}'` (expect `200`).
 - **AI actions report no provider:** select a working model in the Session or in the assistant menu.
 - **Whole-workflow optimization is rejected:** one or more documents changed while the Agent was working, or the Agent did not return every required document. Retry from the latest files.
 - **Apply changes is rejected:** for a retry, add a feedback edge with a finite `maxIterations` and non-empty `exitCondition`; otherwise fix the reported ordinary cycle, missing input, branch limit, or stale revision, then submit the complete topology again.

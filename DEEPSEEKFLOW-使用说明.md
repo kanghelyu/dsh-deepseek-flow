@@ -1,118 +1,194 @@
-# DeepSeek Flow 完整使用说明
+# DeepSeek Flow 中文使用说明 + 教程
 
-> 版本：0.3.21（主 Session 拓扑事务 + 基础逻辑门 + 文档驱动；0.3.18 画布删除/切换确认/拖拽与同步优化；0.3.19 结果与草稿持久化；0.3.20 I/O 与内存防护——写盘跳过、分文件存储、轮询上限与泄漏修复、子代理默认超时；0.3.21 修复 dsh-tools 重复实例导致的工具调度崩溃）
-> 一句话：装上插件，说「构建工作流」，工作流就变成一张能画、能写、能同步的图。
+> 版本：0.4.2
+> 一句话：装好插件，对 Agent 说「构建工作流」，流程就变成一张可画、可写、可同步的图，重启电脑后下拉也不为空。
 
 ---
 
-## 一、这是什么
+## 一、快速开始（3 步教程）
 
-DeepSeek Flow 是 DeepSeek Harness 的可视化工作流插件。每个 session 拥有一张独立的流程图：
-
-- **左栏**：工作流文档目录（WORKFLOW.md 总纲 + 每步 STEP.md 独立工作区）
-- **中栏**：画布（节点、箭头、逻辑门）
-- **右栏**：Markdown 编辑器 + 节点属性
-- **底部**：AI 文档助手（逻辑校验 / 单文档优化 / 整流程优化）
-
-它只负责「编辑流程 + 同步文档 + AI 审查优化」，**不运行工作流**——真正执行永远在当前 Session 由 Agent 完成。
-
-## 二、安装（一条命令）
+### 第 1 步：安装
 
 ```bash
+# 在线安装
 dsh plugin --profile web add "github:kanghelyu/dsh-deepseek-flow#main"
+
+# 如果无法访问 GitHub（离线环境）：
+dsh plugin --profile web add "file:/path/to/dsh-deepseek-flow-0.4.2.tar.gz"
 ```
 
-重启 dsh web 即生效（bundle 插件重启加载；之后 Client 改动硬刷新即可）。依赖全自动，已在干净环境端到端实测。
-
-## 三、一句话构建工作流（内置技能）
-
-插件自带 `deepseek-flow` 技能，装上即注册。触发场景：
-
-1. **直说**：「构建工作流 / 导入工作流 / 把流程做成图 / 可视化这个流程」
-2. **描述流程需求**：「写一个找论文、下论文、读论文、出综述和名词解释的工作流」——即使没有「工作流」三个字，只要是「先…再…最后…」的多步描述就触发
-
-触发后 Agent 自动：复述步骤链确认 → `flow_create` 生成总纲 + 每步 STEP.md + 画布连线 → 你去 DeepSeek Flow 标签查看。以后说「按这个工作流执行」即可逐步执行。
-
-## 四、画布操作
-
-| 操作 | 方式 |
-| --- | --- |
-| 添加节点 | 底部节点工具条（输入 / Agent / Map Agent / 条件 / 合并 / 输出）；新节点落在当前视口中心 |
-| 添加箭头 | 从一个节点**右侧圆点**拖到另一个节点（整个节点框都是可释放区），松开即成 |
-| 平移画布 | 拖拽空白处；**原地单击**空白才取消选中，单纯平移不会打断选中 |
-| 缩放 | Ctrl/⌘+滚轮 或 触控板捏合（以光标为锚点）；双指滑动 = 平移 |
-| 显示全图 | 工具栏按钮（只在切换工作流时自动整图居中，加节点不再跳视口） |
-| 移动节点 | 拖节点——**只算布局，不算拓扑修改**（松手自动保存，不触发「应用修改」）；拖拽过程零卡顿 |
-| 撤销/重做 | Ctrl/⌘+Z / Shift+Ctrl/⌘+Z |
-| 删除工作流 | 工具栏「删除」按钮（确认后托管目录进回收区；共享模板同样可删） |
-| 切换工作流 | 下拉选择器；有未应用拓扑草稿时先弹「丢弃修改并切换」确认 |
-| 弹窗快捷键 | ESC 分层退出：先关最上层弹窗/菜单，全关完才清空画布选中 |
-| 布局 | 左右栏、底部助手均可拖分隔边调整，低于阈值自动收起 |
-
-## 五、逻辑门（条件框）
-
-新建条件框时先选门类型，共 8 种：**IF/ELSE、AND、OR、NOT、NAND、NOR、XOR、XNOR**。
-
-- IF/ELSE：出线后选「是/否」，每个分支只允许一条，第三条被拦截
-- NOT：只允许一条出线，第二条被拦截
-- AND / OR / NAND / NOR / XOR / XNOR：可连多条出线到不同目标，自动标注；重复目标被拦截
-- 重复分支、超限出线、重复目标在写入前拦截并弹警示
-- 已有出线时不能静默切换门类型
-- 旧工作流的 true/false 分支自动推断为 IF/ELSE
-- `flow_evaluate`（工具）可按标准真值表计算门结果和激活目标
-
-> 逻辑门只是画布语义，不执行逻辑；执行在 Session。
-
-## 六、拓扑提交事务（重要）
-
-新增/删除节点、逻辑门、箭头、输入输出 → 只形成**画布草稿**，右下角出现「应用修改」按钮。确认后流程：
-
-```
-本地校验 → 主 Session Agent 审查 → 二次校验 → revision 原子保存
-```
-
-规则：
-
-- **拓扑未应用时**：「逻辑校验」「修改整个工作流」按钮**禁用**（灰色），点击弹「请先保存工作流」；「单文档修改」仍可用
-- **仅移动节点位置不算拓扑修改**，不会出现「应用修改」
-- Markdown 正文走**独立保存通道**（改文档自动写回，与拓扑互不干扰）
-
-## 七、文档双向同步
-
-- 画布节点 ↔ `WORKFLOW.md` / 各步骤 `STEP.md`
-- 改画布（保存/应用）→ 写回 MD 文件；直接改 MD 文件 → 刷新画布即更新
-- 文件是权威：MD 内容优先于画布旧值
-
-## 八、AI 文档助手（底部面板）
-
-| 功能 | 说明 |
-| --- | --- |
-| 逻辑校验 | 校验全部 Markdown 与箭头关系，输出 error/warning（最多 20 条），点击结果定位到对应文档/节点 |
-| 单文档优化 | 只优化当前选中文档，产出方案 → **接受/拒绝制**（接受才写回；原文变了拒绝覆盖） |
-| 整流程优化 | 先确认不可撤销，Agent 返回全部文档后一次原子保存（漏一份即失败） |
-
-- 模型与思考强度：助手头部胶囊按钮选择（跟随会话默认，可自选 off/high/max）
-- 任务跑在**独立会话**：切走、切会话不中断，回来结果自动恢复
-- 多文档优化并发，各自方案独立保留
-- 默认不限时（模型自然完成）
-
-## 九、界面
-
-- **语言**：跟随 WebUI 语言自动切换（中文/English）
-- **主题**：跟随 WebUI 明暗主题自动变色
-- **会话隔离**：每个 session 独立工作流，另有共享模板（无主，所有会话可见）
-
-## 十、维护与卸载
+### 第 2 步：重启 dsh web
 
 ```bash
-# 依赖自愈（老环境兜底）
+pkill dsh && dsh web
+# ⚠ 必须完全 kill + 重新 start，仅刷新浏览器不够
+# 验证：curl -X POST http://127.0.0.1:3080/api/dflow/allFlows -H 'Content-Type: application/json' -d '{"args":{}}'
+# 应返回 200
+```
+
+### 第 3 步：创建你的第一个工作流
+
+打开浏览器 → `http://127.0.0.1:3080` → 新建一个 Session → 在聊天里输入：
+
+> **「构建一个找论文、读论文、出综述的工作流」**
+
+Agent 会自动调用 `flow_create`，完成：
+
+1. 生成 `WORKFLOW.md`（总控文档）
+2. 每步生成一个 `STEP.md` 独立工作区
+3. 画布上画出节点和连线
+
+然后点击顶部 **DeepSeek Flow** 标签，即可看到完整的流程图。
+
+---
+
+## 二、画布操作教程
+
+### 节点操作
+
+| 操作 | 方法 |
+|------|------|
+| **添加节点** | 底部工具栏：输入 / Agent / Map Agent / 条件 / 合并 / 输出 |
+| **连接节点** | 从节点右侧圆点拖到目标节点（整个节点框都是释放区） |
+| **移动节点** | 拖拽节点 — **只算布局，不算拓扑修改**，松手自动保存 |
+| **删除节点** | 选中节点按 Delete，或底部 X 按钮 |
+| **撤销 / 重做** | Ctrl/Cmd+Z / Shift+Ctrl/Cmd+Z |
+
+### 画布导航
+
+| 操作 | 方法 |
+|------|------|
+| **平移** | 拖拽空白区域 |
+| **缩放** | Ctrl/Cmd + 滚轮，或触控板双指捏合 |
+| **适配全图** | 工具栏「显示全图」按钮 |
+| **调整面板宽度** | 拖拽左右分隔条；双击收起/展开 |
+| **调整助手高度** | 拖拽底部助手分隔条 |
+
+### 条件框（逻辑门）
+
+添加「条件」节点时，选择 8 种门类型之一：
+
+| 门类型 | 入边 | 出边行为 |
+|--------|------|----------|
+| **IF/ELSE** | 恰好 1 条 | 最多 1 条「是」+ 1 条「否」出线 |
+| **AND / OR / NAND / NOR / XOR / XNOR** | 至少 2 条 | 可连多个目标，自动标注 |
+| **NOT** | 恰好 1 条 | 恰好 1 条出线 |
+
+> ⚠ 谓词只能写 `truthy`、`falsy`、`nonEmpty`，不能写自然语言条件句。
+> 需要语义判断时，让上游 Agent 输出 JSON Boolean，再用 `predicate: "truthy"` 连接。
+
+---
+
+## 三、工作流切换教程
+
+### 下拉菜单在哪
+
+在 Studio 顶部工具栏，有一个标着工作流名称的下拉选择器。
+
+### 下拉里有什么
+
+- **当前 Session** 的工作流（最前）
+- **其他 Session** 的历史工作流（中间）
+- **共享模板**（最后）
+
+### 切换会发生什么
+
+1. 选其他 Session 的工作流 → 自动复制为当前 Session 的**独立副本**（文档工作区完全隔离）
+2. 选共享模板 → 同样复制独立副本，不污染原件
+3. 每次切换自动保存 `activeFlowId` → 重新打开 Studio 自动回到该工作流
+4. **下拉列表直接从磁盘读取** → 重启 dsh web / 重启电脑后不会为空
+
+### Agent 切换通知
+
+切换工作流后，Agent 下次调用 `flow_list` / `flow_read` 会收到一次性 `activeFlowNotice`：
+
+- 如果用户此前要求运行旧工作流 → Agent 改用新工作流，忽略旧指令
+- 如果工作流没变 → 什么都不说，对话完全连续
+
+---
+
+## 四、AI 拓扑修改（隐形定稿机制）
+
+### 场景 A：Agent 用 `flow_put` 修改拓扑（推荐）
+
+```mermaid
+sequenceDiagram
+  Agent->>Host: flow_put(newFlow)
+  Host->>Disk: saveSessionFlow → revision+1
+  Host-->>Agent: ok, topologyPersisted=true
+  Note over Agent,User: Agent 回复「已更新」
+  User->>Studio: 打开画布
+  Studio->>Host: dflow/list → 读磁盘最新 flow
+  Studio->>Canvas: showFlow → topologyDirty=false → 无「应用修改」
+```
+
+> `flow_put` 本身已经持久化拓扑，画布不会弹「应用修改」。
+
+### 场景 B：Agent 直接改文件 → `flow_finalize_canvas`
+
+```mermaid
+sequenceDiagram
+  Agent->>Host: flow_finalize_canvas(id, expectedRevision?)
+  Host->>Host: 排队 pending 请求（30分钟有效）
+  Host-->>Agent: ok, queued=true
+  Studio->>Host: 每 1.5s 轮询 dflow/finalizePending
+  Studio->>Studio: 发现 pending → 自动点击隐藏定稿按钮
+  Studio->>Host: dflow/topologyFinalize(requestId)
+  Host->>Disk: saveSessionFlow → 持久化
+  Host-->>Studio: finalized, flow
+  Studio->>Canvas: showFlow → 静默同步，无「应用修改」
+```
+
+### 场景 C：Agent 忘记调 `flow_finalize_canvas`（兜底）
+
+Studio 检测到：
+- 磁盘上的拓扑与画布当前拓扑**不同**
+- 画布**没有被用户手工编辑过**
+
+→ 自动触发隐藏定稿（同场景 B）。
+
+---
+
+## 五、文件说明（双语文档）
+
+| 文件 | 语言 | 说明 |
+|------|------|------|
+| `README.md` | English | 项目简介、安装、用法 |
+| `README.zh-CN.md` | 中文 | 项目简介、安装、用法 |
+| `DEEPSEEKFLOW-GUIDE.md` | English | 完整使用指南 + 教程 |
+| `DEEPSEEKFLOW-使用说明.md` | 中文 | 完整使用指南 + 教程（本文） |
+| `skills/deepseek-flow/SKILL.md` | English | Agent Skill 提示词 |
+| `CHANGELOG.md` | English | 版本变更日志 |
+
+---
+
+## 六、常见排错
+
+| 现象 | 原因 | 解决 |
+|------|------|------|
+| 下拉菜单为空 | dsh web 未重启，allFlows endpoint 404 | `pkill dsh && dsh web` 完全重启 |
+| `/api/dflow/allFlows` 返回 404 | Typert 路由表在进程启动时冻结，新增端点未注册 | 完全重启 dsh web，仅刷新浏览器不够 |
+| Agent 调工具返回 `unknown tool ''`（空名称） | dsh host 工具解析 bug | 更新 dsh 版本，或换用 `flow_put` 绕过 |
+| 画布弹「应用修改」但 AI 已改过拓扑 | Agent 的工具调用失败（见上），磁盘拓扑未变；按钮对应的是**用户自己的**画布编辑 | 确认 `flow_put` 返回 `ok=true, topologyPersisted=true` |
+| 节点位置变了但没改拓扑 | 位置是布局信息，不算拓扑修改 | 正常行为，松手自动保存 |
+| 删除工作流后想恢复 | 插件托管文档移入 `deepseek-flow/trash/` | 从 trash 复制回 `workspaces/`，再用 `flow_put` 导入 |
+| 共享模板被污染 | 0.4.2 前可能共享 docRoot | 升级到 0.4.2，切换时自动复制独立副本 |
+| AI 助手/优化提示「provider 不可用」 | Session 未配置可用模型 | 在 Session 或助手菜单选择模型 |
+
+---
+
+## 七、维护
+
+```bash
+# 依赖自愈（旧环境兜底）
 bash scripts/ensure-deps.sh
 
 # 卸载
 dsh plugin --profile web remove deepseek-flow
-```
 
-删除工作流时，插件托管目录进入 `deepseek-flow/trash` 可恢复；外部自定义 docRoot 不自动移动。
+# 重新构建客户端（改过 src/client 后）
+npm run build
+```
 
 ---
 

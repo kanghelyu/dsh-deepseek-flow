@@ -109,6 +109,8 @@ function keepLayout(key, value) {
 function Studio({ connection, sessionId, language }) {
   const t = useMemo(() => text(language), [language]);
   const [flows, setFlows] = useState([]);
+  // 全部历史工作流（跨 Session + 共享模板）的轻量元数据，供下拉菜单分组展示。
+  const [allFlows, setAllFlows] = useState([]);
   const [currentId, setCurrentId] = useState(null);
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
@@ -395,10 +397,38 @@ function Studio({ connection, sessionId, language }) {
 
   const loadFlows = useCallback(async () => {
     try {
-      const items = await remoteCall(connection, "dflow/list", { sessionId });
-      setFlows(items);
-      flowMetaSnapshotRef.current = flowMetaSnapshot(items);
-      const first = items.find((item) => item.id === currentIdRef.current) ?? items[0];
+      // 历史列表与当前列表并行拉取：allFlows 是轻量元数据（不读 Markdown），
+      // 数据源为磁盘存储，重启 dsh web / 重启电脑后依然完整。
+      const [items, history] = await Promise.all([
+        remoteCall(connection, "dflow/list", { sessionId }),
+        remoteCall(connection, "dflow/allFlows", { sessionId }).catch(() => [])
+      ]);
+      const safeItems = Array.isArray(items) ? items : [];
+      const safeHistory = Array.isArray(history) ? history : [];
+      setFlows(safeItems);
+      setAllFlows(safeHistory);
+      flowMetaSnapshotRef.current = flowMetaSnapshot(safeItems);
+      // 优先恢复本 Session 的激活指针；如果它指向历史/共享工作流，先 activate
+      // 导入副本，这样新 Session 在 Studio 里也能直接看到并继续编辑上次的内容。
+      const activeEntry = safeHistory.find((entry) => entry.active);
+      const activeItem = activeEntry ? safeItems.find((item) => item.id === activeEntry.id) : null;
+      let first = safeItems.find((item) => item.id === currentIdRef.current) ?? activeItem ?? safeItems[0] ?? null;
+      if (!first && activeEntry) {
+        try {
+          const activated = await remoteCall(connection, "dflow/activate", { request: { sessionId, flowId: activeEntry.id } });
+          if (activated?.flow) {
+            first = activated.flow;
+            // 导入后刷新当前 Session 列表，使该副本出现在下拉中。
+            const refreshed = await remoteCall(connection, "dflow/list", { sessionId }).catch(() => null);
+            if (Array.isArray(refreshed)) {
+              setFlows(refreshed);
+              flowMetaSnapshotRef.current = flowMetaSnapshot(refreshed);
+            }
+          }
+        } catch (error) {
+          console.error("[deepseek-flow] activate persisted history flow failed:", error);
+        }
+      }
       if (first) {
         showFlow(first, { resetDocument: currentIdRef.current !== first.id });
         await restorePersistedDraft(first);
@@ -681,13 +711,29 @@ function Studio({ connection, sessionId, language }) {
       const saved = await save();
       if (!saved) return;
     }
-    const flow = flows.find((f) => f.id === id);
-    if (!flow) return;
-    showFlow(flow);
-    setDirty(false);
+    // 任何选择都走 activate：当前 Session 已有则只更新指针；历史/共享则导入
+    // 为独立副本。之后刷新列表确保下拉中的 active 标记与 owner 信息正确。
+    try {
+      const activated = await remoteCall(connection, "dflow/activate", { request: { sessionId, flowId: id } });
+      if (!activated?.activated || !activated.flow) {
+        setMessage(t.flowNotFound);
+        return;
+      }
+      const items = await remoteCall(connection, "dflow/list", { sessionId }).catch(() => null);
+      if (Array.isArray(items)) {
+        setFlows(items);
+        flowMetaSnapshotRef.current = flowMetaSnapshot(items);
+      }
+      const history = await remoteCall(connection, "dflow/allFlows", { sessionId }).catch(() => null);
+      if (Array.isArray(history)) setAllFlows(history);
+      showFlow(activated.flow);
+      setDirty(false);
+    } catch (error) {
+      setMessage(String(error));
+    }
   };
 
-  const discardAndSwitchFlow = useCallback(() => {
+  const discardAndSwitchFlow = useCallback(async () => {
     const target = switchFlowTarget;
     setSwitchFlowTarget(null);
     if (!target) return;
@@ -703,12 +749,28 @@ function Studio({ connection, sessionId, language }) {
       draftSavedRef.current = false;
       remoteCall(connection, "dflow/draftClear", { sessionId, flowId: discardedFlowId }).catch(() => {});
     }
-    const flow = flows.find((f) => f.id === target);
-    if (!flow) return;
-    showFlow(flow);
-    setDirty(false);
+    // 历史工作流切换同样走 activate（导入副本 + 持久化激活指针）。
+    try {
+      const activated = await remoteCall(connection, "dflow/activate", { request: { sessionId, flowId: target } });
+      if (!activated?.activated || !activated.flow) {
+        setMessage(t.flowNotFound);
+        return;
+      }
+      const items = await remoteCall(connection, "dflow/list", { sessionId }).catch(() => null);
+      if (Array.isArray(items)) {
+        setFlows(items);
+        flowMetaSnapshotRef.current = flowMetaSnapshot(items);
+      }
+      const history = await remoteCall(connection, "dflow/allFlows", { sessionId }).catch(() => null);
+      if (Array.isArray(history)) setAllFlows(history);
+      showFlow(activated.flow);
+      setDirty(false);
+    } catch (error) {
+      setMessage(String(error));
+      return;
+    }
     setMessage(t.discardedDraftSwitch);
-  }, [connection, flows, sessionId, showFlow, switchFlowTarget, t.discardedDraftSwitch]);
+  }, [connection, flowMetaSnapshot, flows, sessionId, setFlows, showFlow, switchFlowTarget, t.discardedDraftSwitch]);
 
   const finalizeTopologyDirectly = useCallback(async () => {
     if (agentFinalizeBusyRef.current || canvasTopologyEditedRef.current) return;
@@ -1276,6 +1338,10 @@ function Studio({ connection, sessionId, language }) {
       setDirty(true);
       setTopologyApplyConfirm(false);
       setMessage(t.importOk + flow.name);
+      // 导入即选中：更新历史列表与激活指针（新导入的 flow 可能尚不在 allFlows 里）。
+      const history = await remoteCall(connection, "dflow/allFlows", { sessionId }).catch(() => null);
+      if (Array.isArray(history)) setAllFlows(history);
+      remoteCall(connection, "dflow/activate", { request: { sessionId, flowId: flow.id } }).catch(() => {});
     } catch (error) {
       setMessage(t.invalidJson + String(error));
     }
@@ -1310,6 +1376,8 @@ function Studio({ connection, sessionId, language }) {
       setMessage(t.deleteFlowDone + String(currentFlow.name));
       setDeleteFlowConfirm(false);
       await loadFlows();
+      // 删除的是激活工作流时清空指针，避免下次打开选中已删除的 id。
+      remoteCall(connection, "dflow/activate", { request: { sessionId, flowId: null } }).catch(() => {});
     } catch (error) {
       setMessage(t.deleteFlowFailed + String(error));
     } finally {
@@ -1505,6 +1573,8 @@ function Studio({ connection, sessionId, language }) {
             ? items.map((item) => item.id === saved.id ? { ...item, ...saved } : item)
             : [saved, ...items]);
           showFlow(saved, { resetDocument: false });
+          // 应用成功即视为「本 Session 正在使用」：更新激活指针，供下次自动选中。
+          remoteCall(connection, "dflow/activate", { request: { sessionId, flowId: saved.id } }).catch(() => {});
         }
         setDirty(false);
         setMessage(accepted?.alreadyPersisted ? t.topologyAlreadyPersisted : t.topologyNoChanges);
@@ -1525,6 +1595,8 @@ function Studio({ connection, sessionId, language }) {
         persistedRevisionRef.current.set(saved.id, Number(saved.revision) || 0);
         setPersistedTopologySignature(topologySignature(saved));
         setFlows((items) => items.map((item) => item.id === saved.id ? { ...item, ...saved } : item));
+        // 拓扑应用完成：同样更新激活指针。
+        remoteCall(connection, "dflow/activate", { request: { sessionId, flowId: saved.id } }).catch(() => {});
         const liveFlow = serializeFlow(
           currentIdRef.current === saved.id ? (flows.find((item) => item.id === saved.id) ?? saved) : saved,
           nodesRef.current,
@@ -1890,10 +1962,58 @@ function Studio({ connection, sessionId, language }) {
     React.createElement("span", { className: "df-connect-hint" }, t.connectHint)
   );
 
+  // 下拉菜单分组：当前 Session 在前，其后按来源 Session 分组的历史工作流，共享模板最后。
+  // 全部来自 dflow/allFlows（磁盘存储），重启后依然完整。
+  const flowGroups = useMemo(() => {
+    const groups = new Map();
+    const keyOf = (entry) => entry.ownerSessionId === null
+      ? "__shared__"
+      : (entry.ownerSessionId === sessionId ? "__current__" : entry.ownerSessionId);
+    const order = [];
+    for (const entry of allFlows) {
+      const key = keyOf(entry);
+      if (!groups.has(key)) {
+        groups.set(key, []);
+        order.push(key);
+      }
+      groups.get(key).push(entry);
+    }
+    order.sort((a, b) => {
+      const rank = (key) => key === "__current__" ? 0 : key === "__shared__" ? 2 : 1;
+      return rank(a) - rank(b);
+    });
+    return order.map((key) => ({ key, entries: groups.get(key) }));
+  }, [allFlows, sessionId]);
+
   const toolbar = React.createElement("div", { className: "df-toolbar" },
     React.createElement("label", null, t.flow,
-      React.createElement("select", { value: currentId ?? "", onChange: (e) => selectFlow(e.target.value) },
-        flows.map((f) => React.createElement("option", { key: f.id, value: f.id }, `${f.name}${f.sessionId ? "" : ` (${t.shared})`}`))
+      React.createElement("select", {
+        value: currentId ?? "",
+        onChange: (e) => selectFlow(e.target.value),
+        "data-df-role": "flow-switcher",
+        title: t.flowSwitcherTitle
+      },
+        React.createElement("option", { value: "", disabled: true },
+          allFlows.length === 0 ? t.flowSwitcherEmpty : t.flowSwitcherPlaceholder
+        ),
+        flowGroups.map((group) => React.createElement(
+          "optgroup",
+          {
+            key: group.key,
+            label: group.key === "__current__"
+              ? t.flowGroupCurrent
+              : group.key === "__shared__"
+                ? t.flowGroupShared
+                : t.flowGroupHistory
+          },
+          group.entries.map((entry) => {
+            const owned = entry.ownerSessionId === sessionId;
+            const shared = entry.ownerSessionId === null && !owned;
+            return React.createElement("option", { key: entry.id, value: entry.id },
+              `${entry.name}${owned || shared ? "" : ` (${t.shared})`}`
+            );
+          })
+        ))
       )
     ),
     React.createElement("button", { className: "df-btn is-ghost", onClick: () => fileRef.current?.click() }, t.importLabel),
@@ -2640,8 +2760,8 @@ function Studio({ connection, sessionId, language }) {
         }),
         flows.length === 0 && React.createElement("div", { className: "df-empty-flow", "aria-live": "polite" },
           React.createElement("div", { className: "df-empty-flow__card" },
-            React.createElement("strong", null, t.noFlow),
-            React.createElement("span", null, t.emptyFlowHint)
+            React.createElement("strong", null, allFlows.length > 0 ? t.noFlowWithHistory : t.noFlow),
+            React.createElement("span", null, allFlows.length > 0 ? t.emptyFlowHintWithHistory : t.emptyFlowHint)
           )
         ),
         topologyApplyButton

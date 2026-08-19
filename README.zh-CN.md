@@ -85,13 +85,23 @@ my-workflow/
 | 工具 | 用途 |
 | --- | --- |
 | `flow_create` | 创建线性或分支工作流、生成文档并保存到当前 Session。 |
-| `flow_list` / `flow_read` | 查找工作流，读取总控文档、步骤文档、revision、拓扑和逻辑契约。 |
+| `flow_list` / `flow_read` | 查找工作流，读取总控文档、步骤文档、revision、拓扑和逻辑契约；两者都会返回当前激活的 `activeFlowId`，若用户刚在 Studio 切换了工作流，还会附带一次性 `activeFlowNotice`——Agent 应改用切换后的工作流并忽略早期关于运行其他工作流的指令；无通知则保持对话连续性。 |
 | `flow_put` | 导入或原子更新完整 flow 定义；调用成功即代表已经持久化。 |
 | `flow_evaluate` | 根据上游值计算布尔门，不运行任何 Agent 步骤。 |
 | `flow_finalize_canvas` | Agent 直接改文件后，排队触发 Studio 的不可见确定性定稿动作，跳过主 Session 重复审核。 |
 | `flow_delete` | 删除 Session 工作流或共享模板；托管工作区会移入回收区。 |
 
 Harness 的 `skills` 服务就绪后，插件会响应式注册 Skill。包内 `SKILL.md` 的 frontmatter 后保留真实 Markdown 正文，因此文件系统和运行时 provider 都不会再返回空指令。
+
+## 激活工作流与跨 Session 切换
+
+Studio 顶部工具栏的「工作流」下拉列出**全部历史工作流**，按来源分组（当前 Session 在前，其他 Session 其次，共享模板最后）。选中其他 Session 的工作流时，会把它的文档工作区**复制为当前 Session 的独立副本**（外部自定义 docRoot 只挂引用，不复制）。选中共享模板时同样会复制为当前 Session 的独立副本，避免污染共享原件。
+
+每个 Session 把 `activeFlowId`（Studio 中最后使用的工作流）持久化在 `sessions/<id>.json` 里：重新打开 Studio 会自动选中它；指针与历史列表（`dflow/allFlows`）都直接从磁盘读取，重启 dsh web 甚至重启电脑后下拉依然完整，不会为空。新开 Session 画布为空，提示可从下拉选择历史工作流、导入 JSON 或让 Agent 新建。
+
+用户在对话中途切换工作流后，下一次 `flow_list`/`flow_read` 会返回一次性 `activeFlowNotice`，指示 Agent 运行切换后的工作流而非早前指令；通知只发一次，激活工作流没变时什么都不说，对话完全连续。
+
+`flow_create` 支持可选 `language` 参数（`"en"` 或 `"zh"`）。Agent 调用时应传入用户当前语言，使默认名称（`New Flow` / `新工作流`）、默认步骤标签和节点标签按用户语言生成；用户仍可显式覆盖名称。
 
 ## 条件框与逻辑门
 
