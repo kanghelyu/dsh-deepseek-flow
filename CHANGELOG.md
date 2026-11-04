@@ -2,6 +2,18 @@
 
 All notable changes to DeepSeek Flow are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Plugin was disabled by the DSH 0.2.x compatibility gate.** The manifest declared `@deepseek-ai/dsh-tools: ^0.1.0-rc.6`, so DSH host runtimes from 0.2.0 on refused to mount the plugin (`Plugin deepseek-flow@0.4.x is incompatible with dsh 0.2.x: requirements {...}`; see issues #10, #11, #12). `engines.dsh` now states the supported window (`>=0.1.0-rc.6 <0.3.0-0`) and the `@deepseek-ai/dsh-*` peer ranges were widened to match, so the plugin mounts on both the 0.1.x and 0.2.x runtimes.
+- **`dflow/allFlows` and `dflow/activate` answered 404.** Both were registered only through the `@Remote` decorator, whose markers live in module-private state of `@deepseek-ai/dsh-typert-protocol`. When the plugin resolved its own copy of that package instead of the host's (the usual out-of-tree layout), the gateway's copy could not see the markers and dropped the endpoints, leaving the Studio history/workflow dropdown empty (issue #8). Both invocations are now also declared in `lib/typert.descriptors.js`, which travels through the Typert registry as plain data and does not depend on module-instance identity.
+- **The Typert descriptor set was rejected by the 0.1.6+/0.2.x loader.** Those loaders validate a strict codec by calling its `create()` factory (`invocation … parameter codec has no create() factory`), while the shipped descriptors only carried an inline `schema` (the shape ≤0.1.5 validated). Every strict codec now publishes both `create()` and `schema`, so the same descriptors register on either loader generation and the whole 18-method TYPERT contribution stops failing to activate.
+
+### Changed
+
+- The 18 remote methods no longer depend on `@Remote` decorator markers for routing: every method is also declared in `lib/typert.descriptors.js`. This keeps the HTTP routes working even when the plugin and the host resolve two different physical copies of `@deepseek-ai/dsh-typert-protocol` (the normal out-of-tree layout), which is the condition that used to drop `dflow/allFlows` and `dflow/activate` (issue #8). A new test asserts the decorator table and the declarative table never drift apart.
+
 ## [0.4.2] - 2026-08-19
 
 ### Fixed
